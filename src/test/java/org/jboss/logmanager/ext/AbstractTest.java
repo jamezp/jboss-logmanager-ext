@@ -19,8 +19,13 @@
 
 package org.jboss.logmanager.ext;
 
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 import org.jboss.logmanager.ExtLogRecord;
 import org.jboss.logmanager.ExtLogRecord.FormatStyle;
+import org.junit.Assert;
 
 /**
  * @author <a href="mailto:jperkins@redhat.com">James R. Perkins</a>
@@ -43,5 +48,33 @@ public abstract class AbstractTest {
         final ExtLogRecord record = new ExtLogRecord(level, format, FormatStyle.PRINTF, getClass().getName());
         record.setParameters(args);
         return record;
+    }
+
+    protected static void compareMaps(final Map<String, String> m1, final Map<String, String> m2) {
+        String failureMessage = String.format("Keys did not match%n%s%n%s%n", m1.keySet(), m2.keySet());
+        Assert.assertTrue(failureMessage, m1.keySet().containsAll(m2.keySet()));
+        failureMessage = String.format("Values did not match%n%s%n%s%n", m1.values(), m2.values());
+        Assert.assertTrue(failureMessage, m1.values().containsAll(m2.values()));
+    }
+
+    public static class MapBuilder<K, V> {
+        private final Map<K, V> result;
+
+        private MapBuilder(final Map<K, V> result) {
+            this.result = result;
+        }
+
+        public static <K, V> MapBuilder<K, V> create() {
+            return new MapBuilder<>(new LinkedHashMap<K, V>());
+        }
+
+        public MapBuilder<K, V> add(final K key, final V value) {
+            result.put(key, value);
+            return this;
+        }
+
+        public Map<K, V> build() {
+            return Collections.unmodifiableMap(result);
+        }
     }
 }

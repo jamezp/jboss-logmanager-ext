@@ -56,6 +56,7 @@ public abstract class StructuredFormatter extends ExtFormatter {
         LEVEL("level"),
         LOGGER_CLASS_NAME("loggerClassName"),
         LOGGER_NAME("loggerName"),
+        CONTEXT_ID("contextId"),
         MDC("mdc"),
         MESSAGE("message"),
         NDC("ndc"),
@@ -95,6 +96,7 @@ public abstract class StructuredFormatter extends ExtFormatter {
     };
 
     private final Map<Key, String> keyOverrides;
+    private volatile String contextId;
     private volatile boolean printDetails;
     private volatile String datePattern;
     private volatile boolean addEolChar = true;
@@ -169,6 +171,12 @@ public abstract class StructuredFormatter extends ExtFormatter {
             final Generator generator = createGenerator(writer).begin();
             before(generator, record);
 
+            // Should the context id be added
+            final String contextId = this.contextId;
+            if (contextId != null) {
+                generator.add(getKey(Key.CONTEXT_ID), contextId);
+            }
+
             // Add the default structure
             generator.add(getKey(Key.TIMESTAMP), dateFormatThreadLocal.get().format(new Date(record.getMillis())))
                     .add(getKey(Key.SEQUENCE), record.getSequenceNumber())
@@ -218,6 +226,27 @@ public abstract class StructuredFormatter extends ExtFormatter {
      */
     public void setAppendEndOfLine(final boolean addEolChar) {
         this.addEolChar = addEolChar;
+    }
+
+    /**
+     * Gets the context identifier set for this formatter.
+     *
+     * @return the context identifier or {@code null} if one was not set
+     */
+    public String getContextId() {
+        return contextId;
+    }
+
+    /**
+     * Set a context identifier for this formatter or {@code null} for no context identifier.
+     * <p>
+     * This can be used to help identify messages coming from different formatters.
+     * </p>
+     *
+     * @param contextId the context identifier to use or {@code null} to not use a context identifier
+     */
+    public void setContextId(final String contextId) {
+        this.contextId = contextId;
     }
 
     /**

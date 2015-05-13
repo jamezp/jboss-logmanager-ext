@@ -72,6 +72,15 @@ public class JsonFormatterTest extends AbstractTest {
     }
 
     @Test
+    public void testContextId() throws Exception {
+        final JsonFormatter formatter = new JsonFormatter();
+        formatter.setPrintDetails(true);
+        formatter.setContextId("context-id-1");
+        ExtLogRecord record = createLogRecord("Test formatted %s", "message");
+        compare(record, formatter, "context-id-1");
+    }
+
+    @Test
     public void testLogstashFormat() throws Exception {
         KEY_OVERRIDES.put(Key.TIMESTAMP, "@timestamp");
         final LogstashFormatter formatter = new LogstashFormatter();
@@ -145,10 +154,18 @@ public class JsonFormatterTest extends AbstractTest {
         compare(record, formatter.format(record));
     }
 
+    private static void compare(final ExtLogRecord record, final ExtFormatter formatter, final String contextId) {
+        compare(record, formatter.format(record), contextId);
+    }
+
     private static void compare(final ExtLogRecord record, final String jsonString) {
+        compare(record, jsonString, null);
+    }
+
+    private static void compare(final ExtLogRecord record, final String jsonString, final String contextId) {
         final JsonReader reader = Json.createReader(new StringReader(jsonString));
         final JsonObject json = reader.readObject();
-        compare(record, json);
+        compare(record, json, contextId);
     }
 
     private static void compareLogstash(final ExtLogRecord record, final ExtFormatter formatter, final int version) {
@@ -158,7 +175,7 @@ public class JsonFormatterTest extends AbstractTest {
     private static void compareLogstash(final ExtLogRecord record, final String jsonString, final int version) {
         final JsonReader reader = Json.createReader(new StringReader(jsonString));
         final JsonObject json = reader.readObject();
-        compare(record, json);
+        compare(record, json, null);
         final String name = "@version";
         int foundVersion = 0;
         if (json.containsKey(name) && !json.isNull(name)) {
@@ -167,7 +184,7 @@ public class JsonFormatterTest extends AbstractTest {
         Assert.assertEquals(version, foundVersion);
     }
 
-    private static void compare(final ExtLogRecord record, final JsonObject json) {
+    private static void compare(final ExtLogRecord record, final JsonObject json, final String contextId) {
         Assert.assertEquals(record.getLevel(), Level.parse(getString(json, Key.LEVEL)));
         Assert.assertEquals(record.getLoggerClassName(), getString(json, Key.LOGGER_CLASS_NAME));
         Assert.assertEquals(record.getLoggerName(), getString(json, Key.LOGGER_NAME));
@@ -187,6 +204,9 @@ public class JsonFormatterTest extends AbstractTest {
         Assert.assertEquals(record.getSourceMethodName(), getString(json, Key.SOURCE_METHOD_NAME));
         Assert.assertEquals(record.getThreadID(), getInt(json, Key.THREAD_ID));
         Assert.assertEquals(record.getThreadName(), getString(json, Key.THREAD_NAME));
+        if (contextId != null) {
+            Assert.assertEquals(contextId, getString(json, Key.CONTEXT_ID));
+        }
         // TODO (jrp) stack trace should be validated
     }
 

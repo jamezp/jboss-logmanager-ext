@@ -72,6 +72,25 @@ public class JsonFormatterTest extends AbstractTest {
     }
 
     @Test
+    public void testMetaData() throws Exception {
+        final JsonFormatter formatter = new JsonFormatter();
+        formatter.setPrintDetails(true);
+        formatter.setMetaData("context-id=context1");
+        ExtLogRecord record = createLogRecord("Test formatted %s", "message");
+        Map<String, String> metaDataMap = MapBuilder.<String, String>create()
+                .add("context-id", "context1")
+                .build();
+        compare(record, formatter, metaDataMap);
+
+        formatter.setMetaData("vendor=Red Hat\\, Inc.,product-type=JBoss");
+        metaDataMap = MapBuilder.<String, String>create()
+                .add("vendor", "Red Hat, Inc.")
+                .add("product-type", "JBoss")
+                .build();
+        compare(record, formatter, metaDataMap);
+    }
+
+    @Test
     public void testLogstashFormat() throws Exception {
         KEY_OVERRIDES.put(Key.TIMESTAMP, "@timestamp");
         final LogstashFormatter formatter = new LogstashFormatter();
@@ -145,10 +164,18 @@ public class JsonFormatterTest extends AbstractTest {
         compare(record, formatter.format(record));
     }
 
+    private static void compare(final ExtLogRecord record, final ExtFormatter formatter, final Map<String, String> metaData) {
+        compare(record, formatter.format(record), metaData);
+    }
+
     private static void compare(final ExtLogRecord record, final String jsonString) {
+        compare(record, jsonString, null);
+    }
+
+    private static void compare(final ExtLogRecord record, final String jsonString, final Map<String, String> metaData) {
         final JsonReader reader = Json.createReader(new StringReader(jsonString));
         final JsonObject json = reader.readObject();
-        compare(record, json);
+        compare(record, json, metaData);
     }
 
     private static void compareLogstash(final ExtLogRecord record, final ExtFormatter formatter, final int version) {
@@ -158,7 +185,7 @@ public class JsonFormatterTest extends AbstractTest {
     private static void compareLogstash(final ExtLogRecord record, final String jsonString, final int version) {
         final JsonReader reader = Json.createReader(new StringReader(jsonString));
         final JsonObject json = reader.readObject();
-        compare(record, json);
+        compare(record, json, null);
         final String name = "@version";
         int foundVersion = 0;
         if (json.containsKey(name) && !json.isNull(name)) {
@@ -167,11 +194,11 @@ public class JsonFormatterTest extends AbstractTest {
         Assert.assertEquals(version, foundVersion);
     }
 
-    private static void compare(final ExtLogRecord record, final JsonObject json) {
+    private static void compare(final ExtLogRecord record, final JsonObject json, final Map<String, String> metaData) {
         Assert.assertEquals(record.getLevel(), Level.parse(getString(json, Key.LEVEL)));
         Assert.assertEquals(record.getLoggerClassName(), getString(json, Key.LOGGER_CLASS_NAME));
         Assert.assertEquals(record.getLoggerName(), getString(json, Key.LOGGER_NAME));
-        compareMap(record.getMdcCopy(), getMap(json, Key.MDC));
+        compareMaps(record.getMdcCopy(), getMap(json, Key.MDC));
         Assert.assertEquals(record.getFormattedMessage(), getString(json, Key.MESSAGE));
         Assert.assertEquals(
                 new SimpleDateFormat(StructuredFormatter.DEFAULT_DATE_FORMAT).format(new Date(record.getMillis())),
@@ -187,14 +214,11 @@ public class JsonFormatterTest extends AbstractTest {
         Assert.assertEquals(record.getSourceMethodName(), getString(json, Key.SOURCE_METHOD_NAME));
         Assert.assertEquals(record.getThreadID(), getInt(json, Key.THREAD_ID));
         Assert.assertEquals(record.getThreadName(), getString(json, Key.THREAD_NAME));
-        // TODO (jrp) stack trace should be validated
-    }
-
-    private static void compareMap(final Map<String, String> m1, final Map<String, String> m2) {
-        Assert.assertEquals("Map sizes do not match", m1.size(), m2.size());
-        for (String key : m1.keySet()) {
-            Assert.assertTrue("Second map does not contain key " + key, m2.containsKey(key));
-            Assert.assertEquals(m1.get(key), m2.get(key));
+        if (metaData != null) {
+            for (String key : metaData.keySet()) {
+                Assert.assertEquals(metaData.get(key), json.getString(key));
+            }
         }
+        // TODO (jrp) stack trace should be validated
     }
 }

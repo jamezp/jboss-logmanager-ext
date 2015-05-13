@@ -27,6 +27,7 @@ import java.util.Map;
 
 import org.jboss.logmanager.ExtFormatter;
 import org.jboss.logmanager.ExtLogRecord;
+import org.jboss.logmanager.ext.util.ValueParser;
 
 /**
  * An abstract class that uses a generator to help generate structured data from a {@link
@@ -95,6 +96,10 @@ public abstract class StructuredFormatter extends ExtFormatter {
     };
 
     private final Map<Key, String> keyOverrides;
+    // Guarded by this
+    private String metaData;
+    // Guarded by this
+    private Map<String, String> metaDataMap;
     private volatile boolean printDetails;
     private volatile String datePattern;
     private volatile boolean addEolChar = true;
@@ -181,6 +186,16 @@ public abstract class StructuredFormatter extends ExtFormatter {
                     .add(getKey(Key.MDC), record.getMdcCopy())
                     .add(getKey(Key.NDC), record.getNdc())
                     .addStackTrace(record.getThrown());
+            // Print any user meta-data
+            final Map<String, String> metaDataMap;
+            synchronized (this) {
+                metaDataMap = this.metaDataMap;
+            }
+            if (metaDataMap != null && !metaDataMap.isEmpty()) {
+                for (String key : metaDataMap.keySet()) {
+                    generator.add(key, metaDataMap.get(key));
+                }
+            }
             if (details) {
                 generator.add(getKey(Key.SOURCE_CLASS_NAME), record.getSourceClassName())
                         .add(getKey(Key.SOURCE_FILE_NAME), record.getSourceFileName())
@@ -218,6 +233,41 @@ public abstract class StructuredFormatter extends ExtFormatter {
      */
     public void setAppendEndOfLine(final boolean addEolChar) {
         this.addEolChar = addEolChar;
+    }
+
+    /**
+     * Returns the value set for meta data.
+     * <p>
+     * The value is a string where key/value pairs are separated by commas. The key and value are separated by an
+     * equal sign.
+     * </p>
+     *
+     * @return the meta data string or {@code null} if one was not set
+     *
+     * @see ValueParser#stringToMap(String)
+     */
+    public String getMetaData() {
+        return metaData;
+    }
+
+    /**
+     * Sets the meta data to use in the structured format.
+     * <p>
+     * The value is a string where key/value pairs are separated by commas. The key and value are separated by an
+     * equal sign.
+     * </p>
+     *
+     * @param metaData the meta data to set or {@code null} to not format any meta data
+     *
+     * @see ValueParser#stringToMap(String)
+     */
+    public synchronized void setMetaData(final String metaData) {
+        this.metaData = metaData;
+        if (metaData == null) {
+            metaDataMap = null;
+        } else {
+            metaDataMap = ValueParser.stringToMap(metaData);
+        }
     }
 
     /**

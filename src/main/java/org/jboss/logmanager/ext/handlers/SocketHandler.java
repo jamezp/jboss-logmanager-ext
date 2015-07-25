@@ -48,7 +48,7 @@ public class SocketHandler extends ExtHandler {
     /**
      * The type of socket
      */
-    public static enum Protocol {
+    public enum Protocol {
         /**
          * Transmission Control Protocol
          */
@@ -65,6 +65,7 @@ public class SocketHandler extends ExtHandler {
 
     public static final int DEFAULT_PORT = 4560;
 
+    // All the following fields are guarded by this
     private InetAddress address;
     private int port;
     private Protocol protocol;
@@ -149,6 +150,7 @@ public class SocketHandler extends ExtHandler {
             synchronized (this) {
                 if (initialize) {
                     initialize();
+                    initialize = false;
                 }
                 if (writer == null) {
                     return;

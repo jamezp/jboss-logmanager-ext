@@ -26,11 +26,14 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
+
 import javax.json.Json;
 import javax.json.JsonObject;
 import javax.json.JsonReader;
+import javax.json.JsonString;
 import javax.json.JsonValue;
 import javax.json.JsonValue.ValueType;
+import javax.json.stream.JsonParsingException;
 
 import org.jboss.logmanager.ExtFormatter;
 import org.jboss.logmanager.ExtLogRecord;
@@ -96,11 +99,15 @@ public class JsonFormatterTest extends AbstractTest {
         final LogstashFormatter formatter = new LogstashFormatter();
         formatter.setPrintDetails(true);
         ExtLogRecord record = createLogRecord("Test formatted %s", "message");
-        compareLogstash(record, formatter, 1);
+        compareLogstash(record, formatter, 1, null);
 
         record = createLogRecord("Test Message");
         formatter.setVersion(2);
-        compareLogstash(record, formatter, 2);
+        formatter.setAdditionalValuesJson("{ \"field1\" : \"value1\", \"field2\" : 1}");
+        Map<String, String> additionalValues = new HashMap<>();
+        additionalValues.put("field1", "value1");
+        additionalValues.put("field2", "1");
+        compareLogstash(record, formatter, 2, additionalValues);
 
         record = createLogRecord(Level.ERROR, "Test formatted %s", "message");
         record.setLoggerName("org.jboss.logmanager.ext.test");
@@ -108,7 +115,48 @@ public class JsonFormatterTest extends AbstractTest {
         record.setThrown(new RuntimeException("Test Exception"));
         record.putMdc("testMdcKey", "testMdcValue");
         record.setNdc("testNdc");
-        compareLogstash(record, formatter, 2);
+        compareLogstash(record, formatter, 2, null);
+    }
+
+    @Test
+    public void testSetAdditionalValuesJson() {
+        final LogstashFormatter formatter = new LogstashFormatter();
+        Assert.assertNull(formatter.getAdditionalProperties());
+
+        formatter.setAdditionalValuesJson(null);
+        Assert.assertNull(formatter.getAdditionalProperties());
+
+        formatter.setAdditionalValuesJson("");
+        Assert.assertNull(formatter.getAdditionalProperties());
+
+        formatter.setAdditionalValuesJson(" ");
+        Assert.assertNull(formatter.getAdditionalProperties());
+
+        formatter.setAdditionalValuesJson("{}");
+        Assert.assertEquals(Collections.emptyMap(), formatter.getAdditionalProperties());
+
+        formatter.setAdditionalValuesJson("{ \"field1\" : \"value1\", \"field2\" : 1}");
+        Map<String, String> additionalValues = new HashMap<>();
+        additionalValues.put("field1", "value1");
+        additionalValues.put("field2", "1");
+        Assert.assertEquals(additionalValues, formatter.getAdditionalProperties());
+
+        // unsupported map values
+        try {
+            formatter.setAdditionalValuesJson("{ \"field1\" : \"value1\", \"field2\" : {\"a\" : 2}}");
+            Assert.fail("IllegalArgumentException expected");
+        } catch (IllegalArgumentException e) {
+            // expected
+        }
+
+
+        // illegal json map values
+        try {
+            formatter.setAdditionalValuesJson("foo");
+            Assert.fail("JsonParsingException expected");
+        } catch (JsonParsingException e) {
+            // expected
+        }
     }
 
     private static int getInt(final JsonObject json, final Key key) {
@@ -178,11 +226,13 @@ public class JsonFormatterTest extends AbstractTest {
         compare(record, json, metaData);
     }
 
-    private static void compareLogstash(final ExtLogRecord record, final ExtFormatter formatter, final int version) {
-        compareLogstash(record, formatter.format(record), version);
+    private static void compareLogstash(final ExtLogRecord record, final ExtFormatter formatter, final int version,
+                                        final Map<String,String> additionalProperties) {
+        compareLogstash(record, formatter.format(record), version, additionalProperties);
     }
 
-    private static void compareLogstash(final ExtLogRecord record, final String jsonString, final int version) {
+    private static void compareLogstash(final ExtLogRecord record, final String jsonString, final int version,
+                                        final Map<String,String> additionalProperties) {
         final JsonReader reader = Json.createReader(new StringReader(jsonString));
         final JsonObject json = reader.readObject();
         compare(record, json, null);
@@ -192,6 +242,21 @@ public class JsonFormatterTest extends AbstractTest {
             foundVersion = json.getInt(name);
         }
         Assert.assertEquals(version, foundVersion);
+
+        if (additionalProperties != null) {
+            for (Map.Entry<String, String> entry : additionalProperties.entrySet()) {
+                String foundValue = null;
+                if (json.containsKey(entry.getKey()) && !json.isNull(entry.getKey())) {
+                    JsonValue jsonValue = json.get(entry.getKey());
+                    if (jsonValue.getValueType() == ValueType.STRING) {
+                            foundValue = ((JsonString) jsonValue).getString();
+                    }  else {
+                        foundValue =  jsonValue.toString();
+                    }
+                }
+                Assert.assertEquals(entry.getValue(), foundValue);
+            }
+        }
     }
 
     private static void compare(final ExtLogRecord record, final JsonObject json, final Map<String, String> metaData) {

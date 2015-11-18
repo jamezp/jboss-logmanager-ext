@@ -19,15 +19,23 @@
 
 package org.jboss.logmanager.ext.formatters;
 
+import java.io.StringReader;
 import java.io.Writer;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+
 import javax.json.Json;
+import javax.json.JsonObject;
+import javax.json.JsonReader;
+import javax.json.JsonString;
 import javax.json.JsonValue;
 import javax.json.stream.JsonGeneratorFactory;
+import javax.json.stream.JsonParsingException;
+
+import org.jboss.logmanager.ExtLogRecord;
 
 /**
  * A formatter that outputs the record into JSON format optionally printing details.
@@ -48,6 +56,7 @@ import javax.json.stream.JsonGeneratorFactory;
 public class JsonFormatter extends StructuredFormatter {
 
     private final Map<String, Object> config;
+    private Map<String,String> additionalProperties;
 
     /**
      * Creates a new JSON formatter.
@@ -253,5 +262,62 @@ public class JsonFormatter extends StructuredFormatter {
                 }
             }
         }
+    }
+
+    @Override
+    protected void after(Generator generator, ExtLogRecord record) throws Exception {
+        super.after(generator, record);
+        if (additionalProperties != null) {
+            for (Map.Entry<String, String> entry : additionalProperties.entrySet()) {
+                generator.add(entry.getKey(), entry.getValue());
+            }
+        }
+    }
+    /**
+     * Sets the additionalValues as json map string to be added to the log message.
+     *
+     * @throws JsonParsingException if the json string is invalid.
+     * @throws IllegalArgumentException if the json string does not only contain string and number values.
+     * @param additionalPropertiesJson the additional properties to use
+     */
+    public void setAdditionalValuesJson(String additionalPropertiesJson) throws JsonParsingException, IllegalArgumentException {
+        Map<String, String> props = null;
+        if (additionalPropertiesJson != null && !additionalPropertiesJson.trim().isEmpty()) {
+            try (JsonReader reader = Json.createReader(new StringReader(additionalPropertiesJson))) {
+                JsonObject jsonObject = reader.readObject();
+                props = new HashMap<>();
+                for (Map.Entry<String, JsonValue> entry : jsonObject.entrySet()) {
+                    switch (entry.getValue().getValueType()) {
+                        case STRING:
+                            props.put(entry.getKey(), ((JsonString) entry.getValue()).getString());
+                            break;
+                        case NUMBER:
+                            props.put(entry.getKey(), entry.getValue().toString());
+                            break;
+                        default:
+                            throw new IllegalArgumentException("Only strig and number values are allowed in additional properties '"
+                                + additionalPropertiesJson + "'.");
+                    }
+                }
+            }
+        }
+        setAdditionalProperties(props);
+    }
+
+    /**
+     * Sets the additionalValues to be added to the log message.
+     *
+     * @param additionalProperties the additional properties to use
+     */
+    public void setAdditionalProperties(Map<String, String> additionalProperties) {
+        this.additionalProperties = additionalProperties;
+    }
+    /**
+     * Returns the additional properties being used for the {@code @version} property.
+     *
+     * @return the additional properties being added
+     */
+    public Map<String, String> getAdditionalProperties() {
+        return additionalProperties;
     }
 }

@@ -49,6 +49,8 @@ public class JsonFormatter extends StructuredFormatter {
 
     private final Map<String, Object> config;
 
+    private JsonGeneratorFactory factory;
+
     /**
      * Creates a new JSON formatter.
      */
@@ -64,6 +66,7 @@ public class JsonFormatter extends StructuredFormatter {
     public JsonFormatter(final Map<Key, String> keyOverrides) {
         super(keyOverrides);
         config = new HashMap<>();
+        factory = Json.createGeneratorFactory(config);
     }
 
     /**
@@ -89,23 +92,19 @@ public class JsonFormatter extends StructuredFormatter {
             } else {
                 config.remove(javax.json.stream.JsonGenerator.PRETTY_PRINTING);
             }
+            factory = Json.createGeneratorFactory(config);
         }
     }
 
     @Override
     protected Generator createGenerator(final Writer writer) {
-        return new JsonGenerator(writer);
+        return new JsonGenerator(writer, factory);
     }
 
     private class JsonGenerator extends Generator {
         private final javax.json.stream.JsonGenerator generator;
 
-        private JsonGenerator(final Writer writer) {
-            final Map<String, Object> config;
-            synchronized (JsonFormatter.this.config) {
-                config = new HashMap<>(JsonFormatter.this.config);
-            }
-            final JsonGeneratorFactory factory = Json.createGeneratorFactory(config);
+        private JsonGenerator(final Writer writer, final JsonGeneratorFactory factory) {
             generator = factory.createGenerator(writer);
         }
 

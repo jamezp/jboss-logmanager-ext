@@ -31,17 +31,16 @@ import javax.json.stream.JsonGeneratorFactory;
 
 /**
  * A formatter that outputs the record into JSON format optionally printing details.
- * <p/>
+ * <p>
  * Note that including details can be expensive in terms of calculating the caller.
- * <p/>
- * The details include;
+ * </p>
+ * <p>The details include;</p>
  * <ul>
  * <li>{@link org.jboss.logmanager.ExtLogRecord#getSourceClassName() source class name}</li>
  * <li>{@link org.jboss.logmanager.ExtLogRecord#getSourceFileName() source file name}</li>
  * <li>{@link org.jboss.logmanager.ExtLogRecord#getSourceMethodName() source method name}</li>
  * <li>{@link org.jboss.logmanager.ExtLogRecord#getSourceLineNumber() source line number}</li>
  * </ul>
- * <p/>
  *
  * @author <a href="mailto:jperkins@redhat.com">James R. Perkins</a>
  */

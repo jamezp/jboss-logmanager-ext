@@ -27,15 +27,15 @@ import javax.xml.stream.XMLStreamWriter;
 
 /**
  * A formatter that outputs the record in XML format.
- * <p/>
+ * <p>
  * The details include;
+ * </p>
  * <ul>
  * <li>{@link org.jboss.logmanager.ExtLogRecord#getSourceClassName() source class name}</li>
  * <li>{@link org.jboss.logmanager.ExtLogRecord#getSourceFileName() source file name}</li>
  * <li>{@link org.jboss.logmanager.ExtLogRecord#getSourceMethodName() source method name}</li>
  * <li>{@link org.jboss.logmanager.ExtLogRecord#getSourceLineNumber() source line number}</li>
  * </ul>
- * <p/>
  *
  * @author <a href="mailto:jperkins@redhat.com">James R. Perkins</a>
  */

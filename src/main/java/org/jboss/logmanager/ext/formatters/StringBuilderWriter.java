@@ -19,7 +19,6 @@
 
 package org.jboss.logmanager.ext.formatters;
 
-import java.io.IOException;
 import java.io.Writer;
 
 /**
@@ -62,39 +61,39 @@ final class StringBuilderWriter extends Writer {
     }
 
     @Override
-    public void write(final String str) throws IOException {
+    public void write(final String str) {
         builder.append(str);
     }
 
     @Override
-    public void write(final String str, final int off, final int len) throws IOException {
+    public void write(final String str, final int off, final int len) {
         builder.append(str, off, len);
     }
 
     @Override
-    public Writer append(final CharSequence csq) throws IOException {
+    public Writer append(final CharSequence csq) {
         builder.append(csq);
         return this;
     }
 
     @Override
-    public Writer append(final CharSequence csq, final int start, final int end) throws IOException {
+    public Writer append(final CharSequence csq, final int start, final int end) {
         builder.append(csq, start, end);
         return this;
     }
 
     @Override
-    public Writer append(final char c) throws IOException {
+    public Writer append(final char c) {
         builder.append(c);
         return this;
     }
 
     @Override
-    public void flush() throws IOException {
+    public void flush() {
     }
 
     @Override
-    public void close() throws IOException {
+    public void close() {
     }
 
     @Override

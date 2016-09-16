@@ -53,6 +53,7 @@ public abstract class StructuredFormatter extends ExtFormatter {
         EXCEPTION_FRAME_LINE("line"),
         EXCEPTION_FRAME_METHOD("method"),
         EXCEPTION_FRAMES("frames"),
+        EXCEPTION_STACK_TRACE("stackTrace"),
         EXCEPTION_MESSAGE("message"),
         LEVEL("level"),
         LOGGER_CLASS_NAME("loggerClassName"),

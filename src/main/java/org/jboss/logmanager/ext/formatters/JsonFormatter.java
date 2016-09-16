@@ -19,6 +19,8 @@
 
 package org.jboss.logmanager.ext.formatters;
 
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.io.Writer;
 import java.math.BigDecimal;
 import java.math.BigInteger;
@@ -47,6 +49,8 @@ import javax.json.stream.JsonGeneratorFactory;
 public class JsonFormatter extends StructuredFormatter {
 
     private final Map<String, Object> config;
+
+    private boolean simpleStackTrace = false;
 
     /**
      * Creates a new JSON formatter.
@@ -89,6 +93,15 @@ public class JsonFormatter extends StructuredFormatter {
                 config.remove(javax.json.stream.JsonGenerator.PRETTY_PRINTING);
             }
         }
+    }
+
+    /**
+     * Turns on or off simple stacktrace.
+     *
+     * @param simpleStackTrace {@code true} to turn on simple stacktrace or {@code false} to turn it off
+     */
+    public void setSimpleStackTrace(final boolean simpleStackTrace) {
+        this.simpleStackTrace = simpleStackTrace;
     }
 
     @Override
@@ -154,19 +167,26 @@ public class JsonFormatter extends StructuredFormatter {
                 generator.writeStartObject(getKey(Key.EXCEPTION));
                 add(getKey(Key.EXCEPTION_MESSAGE), throwable.getMessage());
 
-                generator.writeStartArray(getKey(Key.EXCEPTION_FRAMES));
-                final StackTraceElement[] elements = throwable.getStackTrace();
-                for (StackTraceElement e : elements) {
-                    generator.writeStartObject();
-                    add(getKey(Key.EXCEPTION_FRAME_CLASS), e.getClassName());
-                    add(getKey(Key.EXCEPTION_FRAME_METHOD), e.getMethodName());
-                    final int line = e.getLineNumber();
-                    if (line >= 0) {
-                        add(getKey(Key.EXCEPTION_FRAME_LINE), e.getLineNumber());
+                if (simpleStackTrace) {
+                    try (StringWriter writer = new StringWriter(); PrintWriter pw = new PrintWriter(writer)) {
+                        throwable.printStackTrace(pw);
+                        add(getKey(Key.EXCEPTION_STACK_TRACE), writer.toString());
                     }
-                    generator.writeEnd(); // end exception element
+                } else {
+                    generator.writeStartArray(getKey(Key.EXCEPTION_FRAMES));
+                    final StackTraceElement[] elements = throwable.getStackTrace();
+                    for (StackTraceElement e : elements) {
+                        generator.writeStartObject();
+                        add(getKey(Key.EXCEPTION_FRAME_CLASS), e.getClassName());
+                        add(getKey(Key.EXCEPTION_FRAME_METHOD), e.getMethodName());
+                        final int line = e.getLineNumber();
+                        if (line >= 0) {
+                            add(getKey(Key.EXCEPTION_FRAME_LINE), e.getLineNumber());
+                        }
+                        generator.writeEnd(); // end exception element
+                    }
+                    generator.writeEnd(); // end array
                 }
-                generator.writeEnd(); // end array
                 generator.writeEnd(); // end exception
             }
             return this;

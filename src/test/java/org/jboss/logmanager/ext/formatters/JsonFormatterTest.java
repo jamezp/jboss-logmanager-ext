@@ -27,6 +27,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import javax.json.Json;
+import javax.json.JsonArray;
 import javax.json.JsonObject;
 import javax.json.JsonReader;
 import javax.json.JsonValue;
@@ -65,7 +66,9 @@ public class JsonFormatterTest extends AbstractTest {
         record = createLogRecord(Level.ERROR, "Test formatted %s", "message");
         record.setLoggerName("org.jboss.logmanager.ext.test");
         record.setMillis(System.currentTimeMillis());
-        record.setThrown(new RuntimeException("Test Exception"));
+        Throwable throwable = new RuntimeException("Test Exception");
+        throwable.initCause(new RuntimeException("Test Caused By Exception"));
+        record.setThrown(throwable);
         record.putMdc("testMdcKey", "testMdcValue");
         record.setNdc("testNdc");
         compare(record, formatter);
@@ -131,6 +134,22 @@ public class JsonFormatterTest extends AbstractTest {
         final String name = getKey(key);
         if (json.containsKey(name) && !json.isNull(name)) {
             return json.getString(name);
+        }
+        return null;
+    }
+
+    private static JsonObject getObject(final JsonObject json, final Key key) {
+        final String name = getKey(key);
+        if (json.containsKey(name) && !json.isNull(name)) {
+            return json.getJsonObject(name);
+        }
+        return null;
+    }
+
+    private static JsonArray getArray(final JsonObject json, final Key key) {
+        final String name = getKey(key);
+        if (json.containsKey(name) && !json.isNull(name)) {
+            return json.getJsonArray(name);
         }
         return null;
     }
@@ -219,6 +238,26 @@ public class JsonFormatterTest extends AbstractTest {
                 Assert.assertEquals(metaData.get(key), json.getString(key));
             }
         }
-        // TODO (jrp) stack trace should be validated
+        compareException(record.getThrown(), json);
+    }
+
+    private static void compareException(Throwable thrown, JsonObject json) {
+        if(thrown != null) {
+            Assert.assertNotNull("Exception has caused by, but json is empty", json);
+            JsonObject exceptionJson = getObject(json, Key.EXCEPTION);
+            Assert.assertEquals(thrown.getMessage(), getString(exceptionJson, Key.EXCEPTION_MESSAGE));
+            JsonArray exceptionFrames = getArray(exceptionJson, Key.EXCEPTION_FRAMES);
+            Assert.assertEquals(thrown.getStackTrace().length, exceptionFrames.size());
+            StackTraceElement[] stacktrace = thrown.getStackTrace();
+            for(int i=0; i<stacktrace.length; i++) {
+                Assert.assertEquals(stacktrace[i].getClassName(), getString(exceptionFrames.getJsonObject(i), Key.EXCEPTION_FRAME_CLASS));
+                Assert.assertEquals(stacktrace[i].getMethodName(), getString(exceptionFrames.getJsonObject(i), Key.EXCEPTION_FRAME_METHOD));
+                if(stacktrace[i].getLineNumber() >= 0) {
+                    Assert.assertEquals(stacktrace[i].getLineNumber(), getInt(exceptionFrames.getJsonObject(i), Key.EXCEPTION_FRAME_LINE));
+                }
+            }
+            Throwable cause = thrown.getCause();
+            compareException(cause, getObject(exceptionJson, Key.EXCEPTION_CAUSED_BY));
+        }
     }
 }

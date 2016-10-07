@@ -54,6 +54,7 @@ public abstract class StructuredFormatter extends ExtFormatter {
         EXCEPTION_FRAME_METHOD("method"),
         EXCEPTION_FRAMES("frames"),
         EXCEPTION_MESSAGE("message"),
+        EXCEPTION_CAUSED_BY("causedBy"),
         LEVEL("level"),
         LOGGER_CLASS_NAME("loggerClassName"),
         LOGGER_NAME("loggerName"),

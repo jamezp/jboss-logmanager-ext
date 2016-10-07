@@ -167,7 +167,13 @@ public class JsonFormatter extends StructuredFormatter {
                     generator.writeEnd(); // end exception element
                 }
                 generator.writeEnd(); // end array
+                if(throwable.getCause() != null) {
+                    generator.writeStartObject(getKey(Key.EXCEPTION_CAUSED_BY));
+                    addStackTrace(throwable.getCause());
+                    generator.writeEnd();
+                }
                 generator.writeEnd(); // end exception
+
             }
             return this;
         }

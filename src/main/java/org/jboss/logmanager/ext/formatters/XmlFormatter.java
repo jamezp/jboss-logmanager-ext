@@ -19,7 +19,9 @@
 
 package org.jboss.logmanager.ext.formatters;
 
+import java.io.PrintWriter;
 import java.io.Writer;
+import java.util.IdentityHashMap;
 import java.util.Map;
 import javax.xml.stream.XMLOutputFactory;
 import javax.xml.stream.XMLStreamException;
@@ -39,6 +41,7 @@ import javax.xml.stream.XMLStreamWriter;
  *
  * @author <a href="mailto:jperkins@redhat.com">James R. Perkins</a>
  */
+@SuppressWarnings("unused")
 public class XmlFormatter extends StructuredFormatter {
 
     private volatile boolean prettyPrint = false;
@@ -83,6 +86,7 @@ public class XmlFormatter extends StructuredFormatter {
 
     private class XmlGenerator extends Generator {
         private final XMLStreamWriter xmlWriter;
+        private int stackTraceId = 0;
 
         private XmlGenerator(final Writer writer) throws XMLStreamException {
             final XMLOutputFactory xmlOutputFactory = XMLOutputFactory.newInstance();
@@ -134,22 +138,17 @@ public class XmlFormatter extends StructuredFormatter {
         @Override
         public Generator addStackTrace(final Throwable throwable) throws Exception {
             if (throwable != null) {
-                writeStart(getKey(Key.EXCEPTION));
-                add(getKey(Key.EXCEPTION_MESSAGE), throwable.getMessage());
-
-                final StackTraceElement[] elements = throwable.getStackTrace();
-                for (StackTraceElement e : elements) {
-                    writeStart(getKey(Key.EXCEPTION_FRAME));
-                    add(getKey(Key.EXCEPTION_FRAME_CLASS), e.getClassName());
-                    add(getKey(Key.EXCEPTION_FRAME_METHOD), e.getMethodName());
-                    final int line = e.getLineNumber();
-                    if (line >= 0) {
-                        add(getKey(Key.EXCEPTION_FRAME_LINE), e.getLineNumber());
-                    }
-                    writeEnd(); // end exception element
+                if (isDetailedExceptionOutputType()) {
+                    // Use the identity of the throwable to determine uniqueness
+                    final Map<Throwable, Integer> seen = new IdentityHashMap<>();
+                    addStackTraceDetail(throwable, seen);
                 }
 
-                writeEnd(); // end exception
+                if (isFormattedExceptionOutputType()) {
+                    final StringBuilderWriter writer = new StringBuilderWriter();
+                    throwable.printStackTrace(new PrintWriter(writer));
+                    add(getKey(Key.STACK_TRACE), writer.toString());
+                }
             }
 
             return this;
@@ -173,6 +172,63 @@ public class XmlFormatter extends StructuredFormatter {
 
         private void writeEnd() throws XMLStreamException {
             xmlWriter.writeEndElement();
+        }
+
+        private void writeExceptionMessage(final Throwable throwable, final int id) throws XMLStreamException {
+            writeStart(getKey(Key.EXCEPTION_MESSAGE));
+            xmlWriter.writeAttribute(getKey(Key.EXCEPTION_REFERENCE_ID), Integer.toString(id));
+            if (throwable.getMessage() != null) {
+                xmlWriter.writeCharacters(throwable.getMessage());
+            }
+            writeEnd(); // end exception message
+        }
+
+        private void addStackTraceDetail(final Throwable throwable, final Map<Throwable, Integer> seen) throws Exception {
+            if (throwable == null) {
+                return;
+            }
+            if (seen.containsKey(throwable)) {
+                writeStart(getKey(Key.EXCEPTION_CIRCULAR_REFERENCE));
+                writeExceptionMessage(throwable, seen.get(throwable));
+                writeEnd(); // end circular reference
+            } else {
+                final int id = stackTraceId++;
+                seen.put(throwable, id);
+                writeStart(getKey(Key.EXCEPTION));
+                writeExceptionMessage(throwable, id);
+
+                final StackTraceElement[] elements = throwable.getStackTrace();
+                for (StackTraceElement e : elements) {
+                    writeStart(getKey(Key.EXCEPTION_FRAME));
+                    add(getKey(Key.EXCEPTION_FRAME_CLASS), e.getClassName());
+                    add(getKey(Key.EXCEPTION_FRAME_METHOD), e.getMethodName());
+                    final int line = e.getLineNumber();
+                    if (line >= 0) {
+                        add(getKey(Key.EXCEPTION_FRAME_LINE), e.getLineNumber());
+                    }
+                    writeEnd(); // end exception frame
+                }
+
+                writeEnd(); // end exception
+
+                // Render the suppressed messages
+                final Throwable[] suppressed = throwable.getSuppressed();
+                if (suppressed != null && suppressed.length > 0) {
+                    writeStart(getKey(Key.EXCEPTION_SUPPRESSED));
+                    for (Throwable s : suppressed) {
+                        addStackTraceDetail(s, seen);
+                    }
+                    writeEnd();
+                }
+
+                // Render the cause
+                final Throwable cause = throwable.getCause();
+                if (cause != null) {
+                    writeStart(getKey(Key.EXCEPTION_CAUSED_BY));
+                    addStackTraceDetail(cause, seen);
+                    writeEnd();
+                }
+            }
         }
 
         public void safeFlush(final XMLStreamWriter flushable) {

@@ -41,19 +41,24 @@ import org.jboss.logmanager.ext.util.ValueParser;
  *
  * @author <a href="mailto:jperkins@redhat.com">James R. Perkins</a>
  */
+@SuppressWarnings("unused")
 public abstract class StructuredFormatter extends ExtFormatter {
 
     /**
      * The key used for the structured log record data.
      */
-    public static enum Key {
+    public enum Key {
         EXCEPTION("exception"),
+        EXCEPTION_CAUSED_BY("causedBy"),
+        EXCEPTION_CIRCULAR_REFERENCE("circularReference"),
         EXCEPTION_FRAME("frame"),
         EXCEPTION_FRAME_CLASS("class"),
         EXCEPTION_FRAME_LINE("line"),
         EXCEPTION_FRAME_METHOD("method"),
         EXCEPTION_FRAMES("frames"),
         EXCEPTION_MESSAGE("message"),
+        EXCEPTION_REFERENCE_ID("refId"),
+        EXCEPTION_SUPPRESSED("suppressed"),
         LEVEL("level"),
         LOGGER_CLASS_NAME("loggerClassName"),
         LOGGER_NAME("loggerName"),
@@ -66,13 +71,14 @@ public abstract class StructuredFormatter extends ExtFormatter {
         SOURCE_FILE_NAME("sourceFileName"),
         SOURCE_LINE_NUMBER("sourceLineNumber"),
         SOURCE_METHOD_NAME("sourceMethodName"),
+        STACK_TRACE("stackTrace"),
         THREAD_ID("threadId"),
         THREAD_NAME("threadName"),
         TIMESTAMP("timestamp");
 
         private final String key;
 
-        private Key(final String key) {
+        Key(final String key) {
             this.key = key;
         }
 
@@ -84,6 +90,26 @@ public abstract class StructuredFormatter extends ExtFormatter {
         public String getKey() {
             return key;
         }
+    }
+
+    /**
+     * Defines the way a cause will be formatted.
+     */
+    public enum ExceptionOutputType {
+        /**
+         * The cause, if present, will be an array of stack trace elements. This will include suppressed exceptions and
+         * the {@linkplain Throwable#getCause() cause} of the exception.
+         */
+        DETAILED,
+        /**
+         * The cause, if present, will be a string representation of the stack trace in a {@code stackTrace} property.
+         * The property value is a string created by {@link Throwable#printStackTrace()}.
+         */
+        FORMATTED,
+        /**
+         * Adds both the {@link #DETAILED} and {@link #FORMATTED}
+         */
+        DETAILED_AND_FORMATTED
     }
 
     public static final String DEFAULT_DATE_FORMAT = "yyyy-MM-dd'T'HH:mm:ss.SSSZ";
@@ -103,6 +129,7 @@ public abstract class StructuredFormatter extends ExtFormatter {
     private volatile boolean printDetails;
     private volatile String datePattern;
     private volatile boolean addEolChar = true;
+    private volatile ExceptionOutputType exceptionOutputType;
 
     protected StructuredFormatter() {
         this(Collections.<Key, String>emptyMap());
@@ -112,6 +139,7 @@ public abstract class StructuredFormatter extends ExtFormatter {
         this.printDetails = false;
         datePattern = DEFAULT_DATE_FORMAT;
         this.keyOverrides = keyOverrides;
+        exceptionOutputType = ExceptionOutputType.DETAILED;
     }
 
     /**
@@ -316,6 +344,49 @@ public abstract class StructuredFormatter extends ExtFormatter {
      */
     public void setPrintDetails(final boolean printDetails) {
         this.printDetails = printDetails;
+    }
+
+    /**
+     * Get the current output type for exceptions.
+     *
+     * @return the output type for exceptions
+     */
+    public ExceptionOutputType getExceptionOutputType() {
+        return exceptionOutputType;
+    }
+
+    /**
+     * Set the output type for exceptions. The default is {@link ExceptionOutputType#DETAILED DETAILED}.
+     *
+     * @param exceptionOutputType the desired output type, if {@code null} {@link ExceptionOutputType#DETAILED} is used
+     */
+    public void setExceptionOutputType(final ExceptionOutputType exceptionOutputType) {
+        if (exceptionOutputType == null) {
+            this.exceptionOutputType = ExceptionOutputType.DETAILED;
+        } else {
+            this.exceptionOutputType = exceptionOutputType;
+        }
+    }
+
+    /**
+     * Checks the exception output type and determines if detailed output should be written.
+     *
+     * @return {@code true} if detailed output should be written, otherwise {@code false}
+     */
+    protected boolean isDetailedExceptionOutputType() {
+        return exceptionOutputType == ExceptionOutputType.DETAILED ||
+                exceptionOutputType == ExceptionOutputType.DETAILED_AND_FORMATTED;
+    }
+
+    /**
+     * Checks the exception output type and determines if formatted output should be written. The formatted output is
+     * equivalent to {@link Throwable#printStackTrace()}.
+     *
+     * @return {@code true} if formatted exception output should be written, otherwide {@code false}
+     */
+    protected boolean isFormattedExceptionOutputType() {
+        return exceptionOutputType == ExceptionOutputType.FORMATTED ||
+                exceptionOutputType == ExceptionOutputType.DETAILED_AND_FORMATTED;
     }
 
     /**

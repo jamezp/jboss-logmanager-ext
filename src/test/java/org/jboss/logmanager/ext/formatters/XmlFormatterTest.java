@@ -56,9 +56,17 @@ public class XmlFormatterTest extends AbstractTest {
         record = createLogRecord(Level.ERROR, "Test formatted %s", "message");
         record.setLoggerName("org.jboss.logmanager.ext.test");
         record.setMillis(System.currentTimeMillis());
-        record.setThrown(new RuntimeException("Test Exception"));
+        final Throwable t = new RuntimeException("Test cause exception");
+        final Throwable dup = new IllegalStateException("Duplicate");
+        t.addSuppressed(dup);
+        final Throwable cause = new RuntimeException("Test Exception", t);
+        dup.addSuppressed(cause);
+        cause.addSuppressed(new IllegalArgumentException("Suppressed"));
+        cause.addSuppressed(dup);
+        record.setThrown(cause);
         record.putMdc("testMdcKey", "testMdcValue");
         record.setNdc("testNdc");
+        formatter.setExceptionOutputType(JsonFormatter.ExceptionOutputType.DETAILED_AND_FORMATTED);
         compare(record, formatter);
     }
 
@@ -138,7 +146,9 @@ public class XmlFormatterTest extends AbstractTest {
             }
             if (state == XMLStreamConstants.START_ELEMENT) {
                 final String localName = reader.getLocalName();
-                if (localName.equals(Key.EXCEPTION.getKey())) {
+                if (localName.equals(Key.EXCEPTION.getKey()) ||
+                        localName.equals(Key.EXCEPTION_CAUSED_BY.getKey()) ||
+                        localName.equals(Key.EXCEPTION_CIRCULAR_REFERENCE.getKey())) {
                     inException = true;// TODO (jrp) stack trace may need to be validated
                 } else if (localName.equals(Key.LEVEL.getKey())) {
                     Assert.assertEquals(record.getLevel(), Level.parse(getString(reader)));

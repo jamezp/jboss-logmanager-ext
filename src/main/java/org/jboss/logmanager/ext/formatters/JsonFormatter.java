@@ -19,11 +19,13 @@
 
 package org.jboss.logmanager.ext.formatters;
 
+import java.io.PrintWriter;
 import java.io.Writer;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.Map;
 import javax.json.Json;
 import javax.json.JsonValue;
@@ -44,6 +46,7 @@ import javax.json.stream.JsonGeneratorFactory;
  *
  * @author <a href="mailto:jperkins@redhat.com">James R. Perkins</a>
  */
+@SuppressWarnings("unused")
 public class JsonFormatter extends StructuredFormatter {
 
     private final Map<String, Object> config;
@@ -98,6 +101,7 @@ public class JsonFormatter extends StructuredFormatter {
 
     private class JsonGenerator extends Generator {
         private final javax.json.stream.JsonGenerator generator;
+        private int stackTraceId = 0;
 
         private JsonGenerator(final Writer writer) {
             final Map<String, Object> config;
@@ -151,23 +155,19 @@ public class JsonFormatter extends StructuredFormatter {
         @Override
         public Generator addStackTrace(final Throwable throwable) throws Exception {
             if (throwable != null) {
-                generator.writeStartObject(getKey(Key.EXCEPTION));
-                add(getKey(Key.EXCEPTION_MESSAGE), throwable.getMessage());
-
-                generator.writeStartArray(getKey(Key.EXCEPTION_FRAMES));
-                final StackTraceElement[] elements = throwable.getStackTrace();
-                for (StackTraceElement e : elements) {
-                    generator.writeStartObject();
-                    add(getKey(Key.EXCEPTION_FRAME_CLASS), e.getClassName());
-                    add(getKey(Key.EXCEPTION_FRAME_METHOD), e.getMethodName());
-                    final int line = e.getLineNumber();
-                    if (line >= 0) {
-                        add(getKey(Key.EXCEPTION_FRAME_LINE), e.getLineNumber());
-                    }
-                    generator.writeEnd(); // end exception element
+                if (isDetailedExceptionOutputType()) {
+                    // Use the identity of the throwable to determine uniqueness
+                    final Map<Throwable, Integer> seen = new IdentityHashMap<>();
+                    generator.writeStartArray(getKey(Key.EXCEPTION));
+                    addStackTraceEntry(throwable, seen);
+                    generator.writeEnd();
                 }
-                generator.writeEnd(); // end array
-                generator.writeEnd(); // end exception
+
+                if (isFormattedExceptionOutputType()) {
+                    final StringBuilderWriter writer = new StringBuilderWriter();
+                    throwable.printStackTrace(new PrintWriter(writer));
+                    generator.write(getKey(Key.STACK_TRACE), writer.toString());
+                }
             }
             return this;
         }
@@ -178,6 +178,60 @@ public class JsonFormatter extends StructuredFormatter {
             generator.flush();
             generator.close();
             return this;
+        }
+
+        private void addStackTraceEntry(final Throwable throwable, final Map<Throwable, Integer> seen) {
+            if (throwable == null) {
+                return;
+            }
+            if (seen.containsKey(throwable)) {
+                generator.writeStartObject();
+                generator.writeStartObject(getKey(Key.EXCEPTION_CIRCULAR_REFERENCE));
+                generator.write(getKey(Key.EXCEPTION_MESSAGE), throwable.getMessage());
+                generator.write(getKey(Key.EXCEPTION_REFERENCE_ID), seen.get(throwable));
+                generator.writeEnd(); // end circular ref object
+                generator.writeEnd(); // end main object
+            } else {
+                seen.put(throwable, stackTraceId++);
+                generator.writeStartObject();
+                add(getKey(Key.EXCEPTION_MESSAGE), throwable.getMessage());
+                add(getKey(Key.EXCEPTION_REFERENCE_ID), stackTraceId);
+                addStackTraceElements(throwable.getStackTrace());
+
+                // Add suppressed messages
+                final Throwable[] suppressed = throwable.getSuppressed();
+                if (suppressed != null && suppressed.length > 0) {
+                    generator.writeStartArray(getKey(Key.EXCEPTION_SUPPRESSED));
+                    for (Throwable s : suppressed) {
+                        addStackTraceEntry(s, seen);
+                    }
+                    generator.writeEnd(); // end suppressed
+                }
+
+                // Add the cause
+                final Throwable cause = throwable.getCause();
+                if (cause != null) {
+                    generator.writeStartArray(getKey(Key.EXCEPTION_CAUSED_BY));
+                    addStackTraceEntry(cause, seen);
+                    generator.writeEnd(); // end cause array
+                }
+                generator.writeEnd(); // end exception object
+            }
+        }
+
+        private void addStackTraceElements(final StackTraceElement[] elements) {
+            generator.writeStartArray(getKey(Key.EXCEPTION_FRAMES));
+            for (StackTraceElement e : elements) {
+                generator.writeStartObject();
+                add(getKey(Key.EXCEPTION_FRAME_CLASS), e.getClassName());
+                add(getKey(Key.EXCEPTION_FRAME_METHOD), e.getMethodName());
+                final int line = e.getLineNumber();
+                if (line >= 0) {
+                    add(getKey(Key.EXCEPTION_FRAME_LINE), e.getLineNumber());
+                }
+                generator.writeEnd(); // end exception element
+            }
+            generator.writeEnd(); // end array
         }
 
         private void writeObject(final String key, final Object obj) {

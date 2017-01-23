@@ -51,6 +51,7 @@ public abstract class StructuredFormatter extends ExtFormatter {
         EXCEPTION("exception"),
         EXCEPTION_CAUSED_BY("causedBy"),
         EXCEPTION_CIRCULAR_REFERENCE("circularReference"),
+        EXCEPTION_TYPE("exceptionType"),
         EXCEPTION_FRAME("frame"),
         EXCEPTION_FRAME_CLASS("class"),
         EXCEPTION_FRAME_LINE("line"),

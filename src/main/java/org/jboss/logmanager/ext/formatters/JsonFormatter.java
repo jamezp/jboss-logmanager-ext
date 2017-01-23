@@ -193,6 +193,7 @@ public class JsonFormatter extends StructuredFormatter {
             } else {
                 seen.put(throwable, stackTraceId++);
                 generator.writeStartObject();
+                add(getKey(Key.EXCEPTION_TYPE), throwable.getClass().getName());
                 add(getKey(Key.EXCEPTION_MESSAGE), throwable.getMessage());
                 add(getKey(Key.EXCEPTION_REFERENCE_ID), stackTraceId);
                 addStackTraceElements(throwable.getStackTrace());

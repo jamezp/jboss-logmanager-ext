@@ -50,13 +50,6 @@ public abstract class AbstractTest {
         return record;
     }
 
-    protected static void compareMaps(final Map<String, String> m1, final Map<String, String> m2) {
-        String failureMessage = String.format("Keys did not match%n%s%n%s%n", m1.keySet(), m2.keySet());
-        Assert.assertTrue(failureMessage, m1.keySet().containsAll(m2.keySet()));
-        failureMessage = String.format("Values did not match%n%s%n%s%n", m1.values(), m2.values());
-        Assert.assertTrue(failureMessage, m1.values().containsAll(m2.values()));
-    }
-
     public static class MapBuilder<K, V> {
         private final Map<K, V> result;
 

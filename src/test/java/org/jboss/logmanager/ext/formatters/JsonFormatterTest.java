@@ -19,37 +19,26 @@
 
 package org.jboss.logmanager.ext.formatters;
 
-import java.io.StringReader;
-import java.text.SimpleDateFormat;
-import java.util.Collections;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.Map;
-import javax.json.Json;
-import javax.json.JsonObject;
-import javax.json.JsonReader;
-import javax.json.JsonValue;
-import javax.json.JsonValue.ValueType;
 
-import org.jboss.logmanager.ExtFormatter;
 import org.jboss.logmanager.ExtLogRecord;
 import org.jboss.logmanager.Level;
 import org.jboss.logmanager.ext.AbstractTest;
 import org.jboss.logmanager.ext.formatters.StructuredFormatter.Key;
-import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
+
+import static org.jboss.logmanager.ext.formatters.JsonTestUtil.compare;
+import static org.jboss.logmanager.ext.formatters.JsonTestUtil.compareLogstash;
 
 /**
  * @author <a href="mailto:jperkins@redhat.com">James R. Perkins</a>
  */
 public class JsonFormatterTest extends AbstractTest {
-    private static final Map<Key, String> KEY_OVERRIDES = new HashMap<>();
 
-    @Before
+  @Before
     public void before() {
-        KEY_OVERRIDES.clear();
+        JsonTestUtil.KEY_OVERRIDES.clear();
     }
 
     @Test
@@ -100,7 +89,7 @@ public class JsonFormatterTest extends AbstractTest {
 
     @Test
     public void testLogstashFormat() throws Exception {
-        KEY_OVERRIDES.put(Key.TIMESTAMP, "@timestamp");
+        JsonTestUtil.KEY_OVERRIDES.put(Key.TIMESTAMP, "@timestamp");
         final LogstashFormatter formatter = new LogstashFormatter();
         formatter.setPrintDetails(true);
         ExtLogRecord record = createLogRecord("Test formatted %s", "message");
@@ -119,114 +108,4 @@ public class JsonFormatterTest extends AbstractTest {
         compareLogstash(record, formatter, 2);
     }
 
-    private static int getInt(final JsonObject json, final Key key) {
-        final String name = getKey(key);
-        if (json.containsKey(name) && !json.isNull(name)) {
-            return json.getInt(name);
-        }
-        return 0;
-    }
-
-    private static long getLong(final JsonObject json, final Key key) {
-        final String name = getKey(key);
-        if (json.containsKey(name) && !json.isNull(name)) {
-            return json.getJsonNumber(name).longValue();
-        }
-        return 0L;
-    }
-
-    private static String getString(final JsonObject json, final Key key) {
-        final String name = getKey(key);
-        if (json.containsKey(name) && !json.isNull(name)) {
-            return json.getString(name);
-        }
-        return null;
-    }
-
-    private static Map<String, String> getMap(final JsonObject json, final Key key) {
-        final String name = getKey(key);
-        if (json.containsKey(name) && !json.isNull(name)) {
-            final Map<String, String> result = new LinkedHashMap<>();
-            final JsonObject mdcObject = json.getJsonObject(name);
-            for (String k : mdcObject.keySet()) {
-                final JsonValue value = mdcObject.get(k);
-                if (value.getValueType() == ValueType.STRING) {
-                    result.put(k, value.toString().replace("\"", ""));
-                } else {
-                    result.put(k, value.toString());
-                }
-            }
-            return result;
-        }
-        return Collections.emptyMap();
-    }
-
-    private static String getKey(final Key key) {
-        if (KEY_OVERRIDES.containsKey(key)) {
-            return KEY_OVERRIDES.get(key);
-        }
-        return key.getKey();
-    }
-
-    private static void compare(final ExtLogRecord record, final ExtFormatter formatter) {
-        compare(record, formatter.format(record));
-    }
-
-    private static void compare(final ExtLogRecord record, final ExtFormatter formatter, final Map<String, String> metaData) {
-        compare(record, formatter.format(record), metaData);
-    }
-
-    private static void compare(final ExtLogRecord record, final String jsonString) {
-        compare(record, jsonString, null);
-    }
-
-    private static void compare(final ExtLogRecord record, final String jsonString, final Map<String, String> metaData) {
-        final JsonReader reader = Json.createReader(new StringReader(jsonString));
-        final JsonObject json = reader.readObject();
-        compare(record, json, metaData);
-    }
-
-    private static void compareLogstash(final ExtLogRecord record, final ExtFormatter formatter, final int version) {
-        compareLogstash(record, formatter.format(record), version);
-    }
-
-    private static void compareLogstash(final ExtLogRecord record, final String jsonString, final int version) {
-        final JsonReader reader = Json.createReader(new StringReader(jsonString));
-        final JsonObject json = reader.readObject();
-        compare(record, json, null);
-        final String name = "@version";
-        int foundVersion = 0;
-        if (json.containsKey(name) && !json.isNull(name)) {
-            foundVersion = json.getInt(name);
-        }
-        Assert.assertEquals(version, foundVersion);
-    }
-
-    private static void compare(final ExtLogRecord record, final JsonObject json, final Map<String, String> metaData) {
-        Assert.assertEquals(record.getLevel(), Level.parse(getString(json, Key.LEVEL)));
-        Assert.assertEquals(record.getLoggerClassName(), getString(json, Key.LOGGER_CLASS_NAME));
-        Assert.assertEquals(record.getLoggerName(), getString(json, Key.LOGGER_NAME));
-        compareMaps(record.getMdcCopy(), getMap(json, Key.MDC));
-        Assert.assertEquals(record.getFormattedMessage(), getString(json, Key.MESSAGE));
-        Assert.assertEquals(
-                new SimpleDateFormat(StructuredFormatter.DEFAULT_DATE_FORMAT).format(new Date(record.getMillis())),
-                getString(json, Key.TIMESTAMP));
-        Assert.assertEquals(record.getNdc(), getString(json, Key.NDC));
-        // Assert.assertEquals(record.getResourceBundle());
-        // Assert.assertEquals(record.getResourceBundleName());
-        // Assert.assertEquals(record.getResourceKey());
-        Assert.assertEquals(record.getSequenceNumber(), getLong(json, Key.SEQUENCE));
-        Assert.assertEquals(record.getSourceClassName(), getString(json, Key.SOURCE_CLASS_NAME));
-        Assert.assertEquals(record.getSourceFileName(), getString(json, Key.SOURCE_FILE_NAME));
-        Assert.assertEquals(record.getSourceLineNumber(), getInt(json, Key.SOURCE_LINE_NUMBER));
-        Assert.assertEquals(record.getSourceMethodName(), getString(json, Key.SOURCE_METHOD_NAME));
-        Assert.assertEquals(record.getThreadID(), getInt(json, Key.THREAD_ID));
-        Assert.assertEquals(record.getThreadName(), getString(json, Key.THREAD_NAME));
-        if (metaData != null) {
-            for (String key : metaData.keySet()) {
-                Assert.assertEquals(metaData.get(key), json.getString(key));
-            }
-        }
-        // TODO (jrp) stack trace should be validated
-    }
 }

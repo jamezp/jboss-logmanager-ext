@@ -25,6 +25,8 @@ import org.jboss.logmanager.ext.AbstractTest;
 import org.junit.Assert;
 import org.junit.Test;
 
+import static org.jboss.logmanager.ext.TestUtil.compareMaps;
+
 /**
  * @author <a href="mailto:jperkins@redhat.com">James R. Perkins</a>
  */

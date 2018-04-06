@@ -19,13 +19,13 @@
 
 package org.jboss.logmanager.ext.formatters;
 
-import java.io.PrintWriter;
 import java.io.Writer;
-import java.util.IdentityHashMap;
 import java.util.Map;
 import javax.xml.stream.XMLOutputFactory;
 import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamWriter;
+
+import org.jboss.logmanager.ext.util.PropertyValues;
 
 /**
  * A formatter that outputs the record in XML format.
@@ -44,21 +44,75 @@ import javax.xml.stream.XMLStreamWriter;
 @SuppressWarnings("unused")
 public class XmlFormatter extends StructuredFormatter {
 
+    /**
+     * The namespaces for logged records.
+     */
+    public enum Namespace {
+        LOGGING_1_0("urn:jboss:logmanager:formatter:1.0");
+
+        private final String uri;
+
+        Namespace(final String uri) {
+            this.uri = uri;
+        }
+
+        /**
+         * Get the URI of this namespace.
+         *
+         * @return the URI
+         */
+        public String getUriString() {
+            return uri;
+        }
+    }
+
+    private final XMLOutputFactory factory = XMLOutputFactory.newFactory();
+
     private volatile boolean prettyPrint = false;
+    private volatile boolean printNamespace = false;
+    private volatile String namespaceUri;
 
     /**
-     * Creates a new XML formatter
+     * Creates a new XML formatter.
      */
     public XmlFormatter() {
+        namespaceUri = Namespace.LOGGING_1_0.getUriString();
     }
 
     /**
      * Creates a new XML formatter.
+     * <p>
+     * If the {@code keyOverrides} is empty the default {@linkplain Namespace#LOGGING_1_0 namespace} will be used.
+     * </p>
      *
-     * @param keyOverrides a map of the default keys to override
+     * @param keyOverrides a string representation of a map to override keys
+     *
+     * @see PropertyValues#stringToEnumMap(Class, String)
+     */
+    public XmlFormatter(final String keyOverrides) {
+        super(keyOverrides);
+        if (keyOverrides == null || keyOverrides.isEmpty()) {
+            namespaceUri = Namespace.LOGGING_1_0.getUriString();
+        } else {
+            namespaceUri = null;
+        }
+    }
+
+    /**
+     * Creates a new XML formatter.
+     * <p>
+     * If the {@code keyOverrides} is empty the default {@linkplain Namespace#LOGGING_1_0 namespace} will be used.
+     * </p>
+     *
+     * @param keyOverrides a map of overrides for the default keys
      */
     public XmlFormatter(final Map<Key, String> keyOverrides) {
         super(keyOverrides);
+        if (keyOverrides == null || keyOverrides.isEmpty()) {
+            namespaceUri = Namespace.LOGGING_1_0.getUriString();
+        } else {
+            namespaceUri = null;
+        }
     }
 
     /**
@@ -73,33 +127,84 @@ public class XmlFormatter extends StructuredFormatter {
     /**
      * Turns on or off pretty printing.
      *
-     * @param b {@code true} to turn on pretty printing or {@code false} to turn it off
+     * @param prettyPrint {@code true} to turn on pretty printing or {@code false} to turn it off
      */
-    public void setPrettyPrint(final boolean b) {
-        prettyPrint = b;
+    public void setPrettyPrint(final boolean prettyPrint) {
+        this.prettyPrint = prettyPrint;
+    }
+
+    /**
+     * Indicates whether or not the name space should be written on the <code>{@literal <record/>}</code>.
+     *
+     * @return {@code true} if the name space should be written for each record
+     */
+    public boolean isPrintNamespace() {
+        return printNamespace;
+    }
+
+    /**
+     * Turns on or off the printing of the namespace for each <code>{@literal <record/>}</code>. This is set to
+     * {@code false} by default.
+     *
+     * @param printNamespace {@code true} if the name space should be written for each record
+     */
+    public void setPrintNamespace(final boolean printNamespace) {
+        this.printNamespace = printNamespace;
+    }
+
+    /**
+     * Returns the namespace URI used for each record if {@link #isPrintNamespace()} is {@code true}.
+     *
+     * @return the namespace URI, may be {@code null} if explicitly set to {@code null}
+     */
+    public String getNamespaceUri() {
+        return namespaceUri;
+    }
+
+    /**
+     * Sets the namespace URI used for each record if {@link #isPrintNamespace()} is {@code true}.
+     *
+     * @param namespace the namespace to use or {@code null} if no namespace URI should be used regardless of the
+     *                  {@link #isPrintNamespace()} value
+     */
+    public void setNamespaceUri(final Namespace namespace) {
+        this.namespaceUri = (namespace == null ? null : namespace.getUriString());
+    }
+
+    /**
+     * Sets the namespace URI used for each record if {@link #isPrintNamespace()} is {@code true}.
+     *
+     * @param namespaceUri the namespace to use or {@code null} if no namespace URI should be used regardless of the
+     *                     {@link #isPrintNamespace()} value
+     */
+    public void setNamespaceUri(final String namespaceUri) {
+        this.namespaceUri = namespaceUri;
     }
 
     @Override
     protected Generator createGenerator(final Writer writer) throws Exception {
-        return new XmlGenerator(writer);
+        final XMLStreamWriter xmlWriter;
+        if (prettyPrint) {
+            xmlWriter = new IndentingXmlWriter(factory.createXMLStreamWriter(writer));
+        } else {
+            xmlWriter = factory.createXMLStreamWriter(writer);
+        }
+        return new XmlGenerator(xmlWriter);
     }
 
     private class XmlGenerator extends Generator {
         private final XMLStreamWriter xmlWriter;
-        private int stackTraceId = 0;
 
-        private XmlGenerator(final Writer writer) throws XMLStreamException {
-            final XMLOutputFactory xmlOutputFactory = XMLOutputFactory.newInstance();
-            if (prettyPrint) {
-                xmlWriter = new IndentingXmlWriter(xmlOutputFactory.createXMLStreamWriter(writer));
-            } else {
-                xmlWriter = xmlOutputFactory.createXMLStreamWriter(writer);
-            }
+        private XmlGenerator(final XMLStreamWriter xmlWriter) {
+            this.xmlWriter = xmlWriter;
         }
 
         @Override
         public Generator begin() throws Exception {
             writeStart(getKey(Key.RECORD));
+            if (printNamespace && namespaceUri != null) {
+                xmlWriter.writeDefaultNamespace(namespaceUri);
+            }
             return this;
         }
 
@@ -136,21 +241,39 @@ public class XmlFormatter extends StructuredFormatter {
         }
 
         @Override
-        public Generator addStackTrace(final Throwable throwable) throws Exception {
-            if (throwable != null) {
-                if (isDetailedExceptionOutputType()) {
-                    // Use the identity of the throwable to determine uniqueness
-                    final Map<Throwable, Integer> seen = new IdentityHashMap<>();
-                    addStackTraceDetail(throwable, seen);
+        public Generator addMetaData(final Map<String, String> metaData) throws Exception {
+            for (String key : metaData.keySet()) {
+                writeStart("metaData");
+                xmlWriter.writeAttribute("key", key);
+                final String value = metaData.get(key);
+                if (value != null) {
+                    xmlWriter.writeCharacters(metaData.get(key));
                 }
-
-                if (isFormattedExceptionOutputType()) {
-                    final StringBuilderWriter writer = new StringBuilderWriter();
-                    throwable.printStackTrace(new PrintWriter(writer));
-                    add(getKey(Key.STACK_TRACE), writer.toString());
-                }
+                writeEnd();
             }
+            return this;
+        }
 
+        @Override
+        public Generator startObject(final String key) throws Exception {
+            writeStart(key);
+            return this;
+        }
+
+        @Override
+        public Generator endObject() throws Exception {
+            writeEnd();
+            return this;
+        }
+
+        @Override
+        public Generator addAttribute(final String name, final int value) throws Exception {
+            return addAttribute(name, Integer.toString(value));
+        }
+
+        @Override
+        public Generator addAttribute(final String name, final String value) throws Exception {
+            xmlWriter.writeAttribute(name, value);
             return this;
         }
 
@@ -160,6 +283,11 @@ public class XmlFormatter extends StructuredFormatter {
             safeFlush(xmlWriter);
             safeClose(xmlWriter);
             return this;
+        }
+
+        @Override
+        public boolean wrapArrays() {
+            return true;
         }
 
         private void writeEmpty(final String name) throws XMLStreamException {
@@ -174,71 +302,14 @@ public class XmlFormatter extends StructuredFormatter {
             xmlWriter.writeEndElement();
         }
 
-        private void writeExceptionMessage(final Throwable throwable, final int id) throws XMLStreamException {
-            writeStart(getKey(Key.EXCEPTION_MESSAGE));
-            xmlWriter.writeAttribute(getKey(Key.EXCEPTION_REFERENCE_ID), Integer.toString(id));
-            if (throwable.getMessage() != null) {
-                xmlWriter.writeCharacters(throwable.getMessage());
-            }
-            writeEnd(); // end exception message
-        }
-
-        private void addStackTraceDetail(final Throwable throwable, final Map<Throwable, Integer> seen) throws Exception {
-            if (throwable == null) {
-                return;
-            }
-            if (seen.containsKey(throwable)) {
-                writeStart(getKey(Key.EXCEPTION_CIRCULAR_REFERENCE));
-                writeExceptionMessage(throwable, seen.get(throwable));
-                writeEnd(); // end circular reference
-            } else {
-                final int id = stackTraceId++;
-                seen.put(throwable, id);
-                writeStart(getKey(Key.EXCEPTION));
-                writeExceptionMessage(throwable, id);
-
-                final StackTraceElement[] elements = throwable.getStackTrace();
-                for (StackTraceElement e : elements) {
-                    writeStart(getKey(Key.EXCEPTION_FRAME));
-                    add(getKey(Key.EXCEPTION_FRAME_CLASS), e.getClassName());
-                    add(getKey(Key.EXCEPTION_FRAME_METHOD), e.getMethodName());
-                    final int line = e.getLineNumber();
-                    if (line >= 0) {
-                        add(getKey(Key.EXCEPTION_FRAME_LINE), e.getLineNumber());
-                    }
-                    writeEnd(); // end exception frame
-                }
-
-                writeEnd(); // end exception
-
-                // Render the suppressed messages
-                final Throwable[] suppressed = throwable.getSuppressed();
-                if (suppressed != null && suppressed.length > 0) {
-                    writeStart(getKey(Key.EXCEPTION_SUPPRESSED));
-                    for (Throwable s : suppressed) {
-                        addStackTraceDetail(s, seen);
-                    }
-                    writeEnd();
-                }
-
-                // Render the cause
-                final Throwable cause = throwable.getCause();
-                if (cause != null) {
-                    writeStart(getKey(Key.EXCEPTION_CAUSED_BY));
-                    addStackTraceDetail(cause, seen);
-                    writeEnd();
-                }
-            }
-        }
-
-        public void safeFlush(final XMLStreamWriter flushable) {
+        private void safeFlush(final XMLStreamWriter flushable) {
             if (flushable != null) try {
                 flushable.flush();
             } catch (Throwable ignore) {
             }
         }
 
-        public void safeClose(final XMLStreamWriter closeable) {
+        private void safeClose(final XMLStreamWriter closeable) {
             if (closeable != null) try {
                 closeable.close();
             } catch (Throwable ignore) {

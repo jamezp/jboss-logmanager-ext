@@ -19,15 +19,19 @@
 
 package org.jboss.logmanager.ext.formatters;
 
+import java.io.PrintWriter;
 import java.io.Writer;
 import java.text.SimpleDateFormat;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Date;
+import java.util.EnumMap;
+import java.util.IdentityHashMap;
 import java.util.Map;
 
 import org.jboss.logmanager.ExtFormatter;
 import org.jboss.logmanager.ExtLogRecord;
-import org.jboss.logmanager.ext.util.ValueParser;
+import org.jboss.logmanager.ext.util.PropertyValues;
 
 /**
  * An abstract class that uses a generator to help generate structured data from a {@link
@@ -36,12 +40,12 @@ import org.jboss.logmanager.ext.util.ValueParser;
  * Note that including details can be expensive in terms of calculating the caller.
  * </p>
  * <p>
- * By default the appending {@link #setAppendEndOfLine(boolean) EOL (\n)} is set to {@code true}.
+ * By default the {@linkplain #setRecordDelimiter(String) record delimiter} is set to {@code \n}.
  * </p>
  *
  * @author <a href="mailto:jperkins@redhat.com">James R. Perkins</a>
  */
-@SuppressWarnings("unused")
+@SuppressWarnings({"unused", "InstanceVariableMayNotBeInitialized"})
 public abstract class StructuredFormatter extends ExtFormatter {
 
     /**
@@ -113,33 +117,39 @@ public abstract class StructuredFormatter extends ExtFormatter {
         DETAILED_AND_FORMATTED
     }
 
-    public static final String DEFAULT_DATE_FORMAT = "yyyy-MM-dd'T'HH:mm:ss.SSSZ";
-    private final ThreadLocal<SimpleDateFormat> dateFormatThreadLocal = new ThreadLocal<SimpleDateFormat>() {
-        @Override
-        protected SimpleDateFormat initialValue() {
-            final String dateFormat = StructuredFormatter.this.datePattern;
-            return new SimpleDateFormat(dateFormat == null ? DEFAULT_DATE_FORMAT : dateFormat);
-        }
-    };
+    public static final String DEFAULT_DATE_FORMAT = "yyyy-MM-dd'T'HH:mm:ssXXX";
 
     private final Map<Key, String> keyOverrides;
+    private final String keyOverridesValue;
     // Guarded by this
     private String metaData;
     // Guarded by this
     private Map<String, String> metaDataMap;
     private volatile boolean printDetails;
-    private volatile String datePattern;
-    private volatile boolean addEolChar = true;
+    private volatile SimpleDateFormat dateTimeFormatter;
+    private volatile String eorDelimiter = "\n";
     private volatile ExceptionOutputType exceptionOutputType;
+    private final StringBuilderWriter writer = new StringBuilderWriter();
+    // Guarded by this
+    private int refId;
 
     protected StructuredFormatter() {
-        this(Collections.<Key, String>emptyMap());
+        this(null, null);
     }
 
     protected StructuredFormatter(final Map<Key, String> keyOverrides) {
+        this(keyOverrides, PropertyValues.mapToString(keyOverrides));
+    }
+
+    protected StructuredFormatter(final String keyOverrides) {
+        this(PropertyValues.stringToEnumMap(Key.class, keyOverrides), keyOverrides);
+    }
+
+    private StructuredFormatter(final Map<Key, String> keyOverrides, final String keyOverridesValue) {
+        this.keyOverridesValue = keyOverridesValue;
         this.printDetails = false;
-        datePattern = DEFAULT_DATE_FORMAT;
-        this.keyOverrides = keyOverrides;
+        dateTimeFormatter = new SimpleDateFormat(DEFAULT_DATE_FORMAT);
+        this.keyOverrides = (keyOverrides == null ? Collections.<Key, String>emptyMap() : new EnumMap<>(keyOverrides));
         exceptionOutputType = ExceptionOutputType.DETAILED;
     }
 
@@ -187,42 +197,39 @@ public abstract class StructuredFormatter extends ExtFormatter {
     }
 
     @Override
-    public String format(final ExtLogRecord record) {
+    public synchronized String format(final ExtLogRecord record) {
         final boolean details = printDetails;
         try {
-            // Attempt at reuse of date formatting
-            final SimpleDateFormat sdf = dateFormatThreadLocal.get();
-            final String pattern = this.datePattern;
-            if (!sdf.toPattern().equals(pattern)) {
-                sdf.applyPattern(pattern);
-            }
-
-            // Create the writer
-            final StringBuilderWriter writer = new StringBuilderWriter();
-
             final Generator generator = createGenerator(writer).begin();
             before(generator, record);
 
             // Add the default structure
-            generator.add(getKey(Key.TIMESTAMP), dateFormatThreadLocal.get().format(new Date(record.getMillis())))
+            generator.add(getKey(Key.TIMESTAMP), dateTimeFormatter.format(new Date(record.getMillis())))
                     .add(getKey(Key.SEQUENCE), record.getSequenceNumber())
                     .add(getKey(Key.LOGGER_CLASS_NAME), record.getLoggerClassName())
                     .add(getKey(Key.LOGGER_NAME), record.getLoggerName())
                     .add(getKey(Key.LEVEL), record.getLevel().getName())
-                    .add(getKey(Key.THREAD_NAME), record.getThreadName())
                     .add(getKey(Key.MESSAGE), record.getFormattedMessage())
+                    .add(getKey(Key.THREAD_NAME), record.getThreadName())
                     .add(getKey(Key.THREAD_ID), record.getThreadID())
                     .add(getKey(Key.MDC), record.getMdcCopy())
-                    .add(getKey(Key.NDC), record.getNdc())
-                    .addStackTrace(record.getThrown());
-            // Print any user meta-data
-            final Map<String, String> metaDataMap;
-            synchronized (this) {
-                metaDataMap = this.metaDataMap;
-            }
-            if (metaDataMap != null && !metaDataMap.isEmpty()) {
-                for (String key : metaDataMap.keySet()) {
-                    generator.add(key, metaDataMap.get(key));
+                    .add(getKey(Key.NDC), record.getNdc());
+
+            // Add the cause of the log message if applicable
+            final Throwable thrown = record.getThrown();
+            if (thrown != null) {
+                if (isDetailedExceptionOutputType()) {
+                    refId = 0;
+                    final Map<Throwable, Integer> seen = new IdentityHashMap<>();
+                    generator.startObject(getKey(Key.EXCEPTION));
+                    addException(generator, thrown, seen);
+                    generator.endObject();
+                }
+
+                if (isFormattedExceptionOutputType()) {
+                    final StringBuilderWriter w = new StringBuilderWriter();
+                    thrown.printStackTrace(new PrintWriter(w));
+                    generator.add(getKey(Key.STACK_TRACE), w.toString());
                 }
             }
             if (details) {
@@ -232,36 +239,54 @@ public abstract class StructuredFormatter extends ExtFormatter {
                         .add(getKey(Key.SOURCE_LINE_NUMBER), record.getSourceLineNumber());
             }
 
+            if (isNotNullOrEmpty(metaData)) {
+                generator.addMetaData(metaDataMap);
+            }
+
             after(generator, record);
             generator.end();
 
             // Append an EOL character if desired
-            if (addEolChar) {
-                writer.append('\n');
+            if (getRecordDelimiter() != null) {
+                writer.append(getRecordDelimiter());
             }
             return writer.toString();
         } catch (Exception e) {
             // Wrap and rethrow
             throw new RuntimeException(e);
+        } finally {
+            // Clear the writer for the next format
+            writer.clear();
         }
     }
 
     /**
-     * Indicates whether or not an EOL ({@code \n}) character will appended to the formatted message.
+     * A string representation of the key overrides. The default is {@code null}.
      *
-     * @return {@code true} to append the EOL character, otherwise {@code false}
+     * @return a string representation of the key overrides or {@code null} if no overrides were configured
      */
-    public boolean isAppendEndOfLine() {
-        return addEolChar;
+    public String getKeyOverrides() {
+        return keyOverridesValue;
     }
 
     /**
-     * Set whether or not an EOL ({@code \n}) character will appended to the formatted message.
+     * Returns the character used to indicate the record has is complete. This defaults to {@code \n} and may be
+     * {@code null} if no end of record character is desired.
      *
-     * @param addEolChar {@code true} to append the EOL character, otherwise {@code false}
+     * @return the end of record delimiter or {@code null} if no delimiter is desired
      */
-    public void setAppendEndOfLine(final boolean addEolChar) {
-        this.addEolChar = addEolChar;
+    public String getRecordDelimiter() {
+        return eorDelimiter;
+    }
+
+    /**
+     * Sets the value to be used to indicate the end of a record. If set to {@code null} no delimiter will be used at
+     * the end of the record.
+     *
+     * @param eorDelimiter the delimiter to be used or {@code null} to not use a delimiter
+     */
+    public void setRecordDelimiter(final String eorDelimiter) {
+        this.eorDelimiter = eorDelimiter;
     }
 
     /**
@@ -273,7 +298,7 @@ public abstract class StructuredFormatter extends ExtFormatter {
      *
      * @return the meta data string or {@code null} if one was not set
      *
-     * @see ValueParser#stringToMap(String)
+     * @see PropertyValues#stringToMap(String)
      */
     public String getMetaData() {
         return metaData;
@@ -288,14 +313,14 @@ public abstract class StructuredFormatter extends ExtFormatter {
      *
      * @param metaData the meta data to set or {@code null} to not format any meta data
      *
-     * @see ValueParser#stringToMap(String)
+     * @see PropertyValues#stringToMap(String)
      */
     public synchronized void setMetaData(final String metaData) {
         this.metaData = metaData;
         if (metaData == null) {
             metaDataMap = null;
         } else {
-            metaDataMap = ValueParser.stringToMap(metaData);
+            metaDataMap = PropertyValues.stringToMap(metaData);
         }
     }
 
@@ -305,7 +330,7 @@ public abstract class StructuredFormatter extends ExtFormatter {
      * @return the current date format
      */
     public String getDateFormat() {
-        return datePattern;
+        return dateTimeFormatter.toPattern();
     }
 
     /**
@@ -317,11 +342,11 @@ public abstract class StructuredFormatter extends ExtFormatter {
      *
      * @param pattern the pattern to use
      */
-    public void setDateFormat(final String pattern) {
+    public synchronized void setDateFormat(final String pattern) {
         if (pattern == null) {
-            this.datePattern = DEFAULT_DATE_FORMAT;
+            this.dateTimeFormatter = new SimpleDateFormat(DEFAULT_DATE_FORMAT);
         } else {
-            this.datePattern = pattern;
+            this.dateTimeFormatter = new SimpleDateFormat(pattern);
         }
     }
 
@@ -388,6 +413,80 @@ public abstract class StructuredFormatter extends ExtFormatter {
     protected boolean isFormattedExceptionOutputType() {
         return exceptionOutputType == ExceptionOutputType.FORMATTED ||
                 exceptionOutputType == ExceptionOutputType.DETAILED_AND_FORMATTED;
+    }
+
+    private void addException(final Generator generator, final Throwable throwable, final Map<Throwable, Integer> seen) throws Exception {
+        if (throwable == null) {
+            return;
+        }
+        if (seen.containsKey(throwable)) {
+            generator.addAttribute(getKey(Key.EXCEPTION_REFERENCE_ID), seen.get(throwable));
+            generator.startObject(getKey(Key.EXCEPTION_CIRCULAR_REFERENCE));
+            generator.add(getKey(Key.EXCEPTION_MESSAGE), throwable.getMessage());
+            generator.endObject(); // end circular reference
+        } else {
+            final int id = ++refId;
+            seen.put(throwable, id);
+            generator.addAttribute(getKey(Key.EXCEPTION_REFERENCE_ID), id);
+            generator.add(getKey(Key.EXCEPTION_TYPE), throwable.getClass().getName());
+            generator.add(getKey(Key.EXCEPTION_MESSAGE), throwable.getMessage());
+
+            final StackTraceElement[] elements = throwable.getStackTrace();
+            addStackTraceElements(generator, elements);
+
+            // Render the suppressed messages
+            final Throwable[] suppressed = throwable.getSuppressed();
+            if (suppressed != null && suppressed.length > 0) {
+                generator.startArray(getKey(Key.EXCEPTION_SUPPRESSED));
+                for (Throwable s : suppressed) {
+                    if (generator.wrapArrays()) {
+                        generator.startObject(getKey(Key.EXCEPTION));
+                    } else {
+                        generator.startObject(null);
+                    }
+                    addException(generator, s, seen);
+                    generator.endObject(); // end exception
+                }
+                generator.endArray();
+            }
+
+            // Render the cause
+            final Throwable cause = throwable.getCause();
+            if (cause != null) {
+                generator.startObject(getKey(Key.EXCEPTION_CAUSED_BY));
+                generator.startObject(getKey(Key.EXCEPTION));
+                addException(generator, cause, seen);
+                generator.endObject();
+                generator.endObject(); // end exception
+            }
+        }
+    }
+
+    private void addStackTraceElements(final Generator generator, final StackTraceElement[] elements) throws Exception {
+        generator.startArray(getKey(Key.EXCEPTION_FRAMES));
+        for (StackTraceElement e : elements) {
+            if (generator.wrapArrays()) {
+                generator.startObject(getKey(Key.EXCEPTION_FRAME));
+            } else {
+                generator.startObject(null);
+            }
+            generator.add(getKey(Key.EXCEPTION_FRAME_CLASS), e.getClassName());
+            generator.add(getKey(Key.EXCEPTION_FRAME_METHOD), e.getMethodName());
+            final int line = e.getLineNumber();
+            if (line >= 0) {
+                generator.add(getKey(Key.EXCEPTION_FRAME_LINE), e.getLineNumber());
+            }
+            generator.endObject(); // end exception object
+        }
+        generator.endArray(); // end array
+    }
+
+    private static boolean isNotNullOrEmpty(final String value) {
+        return value != null && !value.isEmpty();
+    }
+
+    private static boolean isNotNullOrEmpty(final Collection<?> value) {
+        return value != null && !value.isEmpty();
     }
 
     /**
@@ -461,20 +560,111 @@ public abstract class StructuredFormatter extends ExtFormatter {
         public abstract Generator add(String key, String value) throws Exception;
 
         /**
-         * Writes the stack trace.
+         * Adds the meta data to the structured format.
          * <p>
-         * The implementation is allowed to write the stack trace however is desirable. For example the frames of the
-         * stack trace can be broken down into an array or {@link Throwable#printStackTrace()} could be used to
-         * represent the stack trace.
+         * By default this processes the map and uses {@link #add(String, String)} to add entries.
          * </p>
          *
-         * @param throwable the exception to write the stack trace for or {@code null} if there is no throwable
+         * @param metaData the matp of the meta data, cannot be {@code null}
          *
          * @return the generator
          *
          * @throws Exception if an error occurs while adding the data
          */
-        public abstract Generator addStackTrace(Throwable throwable) throws Exception;
+        public Generator addMetaData(final Map<String, String> metaData) throws Exception {
+            for (String key : metaData.keySet()) {
+                add(key, metaData.get(key));
+            }
+            return this;
+        }
+
+        /**
+         * Writes the start of an object.
+         * <p>
+         * If the {@link #wrapArrays()} returns {@code false} the key may be {@code null} and implementations should
+         * handle this.
+         * </p>
+         *
+         * @param key they key for the object, or {@code null} if this object was
+         *            {@linkplain #startArray(String) started in an array} and the {@link #wrapArrays()} is
+         *            {@code false}
+         *
+         * @return the generator
+         *
+         * @throws Exception if an error occurs while adding the data
+         */
+        public abstract Generator startObject(String key) throws Exception;
+
+        /**
+         * Writes an end to the object.
+         *
+         * @return the generator
+         *
+         * @throws Exception if an error occurs while adding the data
+         */
+        public abstract Generator endObject() throws Exception;
+
+        /**
+         * Writes the start of an array. This defaults to {@link #startObject(String)} for convenience of generators
+         * that don't have a specific type for arrays.
+         *
+         * @param key they key for the array
+         *
+         * @return the generator
+         *
+         * @throws Exception if an error occurs while adding the data
+         */
+        public Generator startArray(String key) throws Exception {
+            return startObject(key);
+        }
+
+        /**
+         * Writes an end for an array. This defaults to {@link #endObject()} for convenience of generators that don't
+         * have a specific type for arrays.
+         *
+         * @return the generator
+         *
+         * @throws Exception if an error occurs while adding the data
+         */
+        public Generator endArray() throws Exception {
+            return endObject();
+        }
+
+        /**
+         * Writes an attribute.
+         * <p>
+         * By default this uses the {@link #add(String, int)} method to add the attribute. If a formatter requires
+         * special handling for attributes, for example an attribute on an XML element, this method can be overridden.
+         * </p>
+         *
+         * @param name  the name of the attribute
+         * @param value the value of the attribute
+         *
+         * @return the generator
+         *
+         * @throws Exception if an error occurs while adding the data
+         */
+        public Generator addAttribute(final String name, final int value) throws Exception {
+            return add(name, value);
+        }
+
+        /**
+         * Writes an attribute.
+         * <p>
+         * By default this uses the {@link #add(String, String)} method to add the attribute. If a formatter requires
+         * special handling for attributes, for example an attribute on an XML element, this method can be overridden.
+         * </p>
+         *
+         * @param name  the name of the attribute
+         * @param value the value of the attribute
+         *
+         * @return the generator
+         *
+         * @throws Exception if an error occurs while adding the data
+         */
+        public Generator addAttribute(final String name, final String value) throws Exception {
+            return add(name, value);
+        }
 
         /**
          * Writes any trailing data that's needed.
@@ -484,5 +674,14 @@ public abstract class StructuredFormatter extends ExtFormatter {
          * @throws Exception if an error occurs while adding the data during the build
          */
         public abstract Generator end() throws Exception;
+
+        /**
+         * Indicates whether or not elements in an array should be wrapped or not. The default is {@code false}.
+         *
+         * @return {@code true} if elements should be wrapped, otherwise {@code false}
+         */
+        public boolean wrapArrays() {
+            return false;
+        }
     }
 }

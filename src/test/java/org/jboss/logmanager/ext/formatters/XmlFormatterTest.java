@@ -25,10 +25,15 @@ import java.util.Collections;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import javax.xml.XMLConstants;
 import javax.xml.stream.XMLInputFactory;
 import javax.xml.stream.XMLStreamConstants;
 import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
+import javax.xml.transform.stream.StreamSource;
+import javax.xml.validation.Schema;
+import javax.xml.validation.SchemaFactory;
+import javax.xml.validation.Validator;
 
 import org.jboss.logmanager.ExtFormatter;
 import org.jboss.logmanager.ExtLogRecord;
@@ -37,11 +42,70 @@ import org.jboss.logmanager.ext.AbstractTest;
 import org.jboss.logmanager.ext.formatters.StructuredFormatter.Key;
 import org.junit.Assert;
 import org.junit.Test;
+import org.xml.sax.ErrorHandler;
+import org.xml.sax.SAXException;
+import org.xml.sax.SAXParseException;
 
 /**
  * @author <a href="mailto:jperkins@redhat.com">James R. Perkins</a>
  */
 public class XmlFormatterTest extends AbstractTest {
+
+    @Test
+    public void validate() throws Exception {
+        // Configure the formatter
+        final XmlFormatter formatter = new XmlFormatter();
+        formatter.setPrintNamespace(true);
+        formatter.setPrintDetails(true);
+        formatter.setExceptionOutputType(StructuredFormatter.ExceptionOutputType.DETAILED_AND_FORMATTED);
+        formatter.setMetaData("key1=value1,key2=value2");
+        // Create the record get format a message
+        final ExtLogRecord record = createLogRecord(Level.ERROR, "Test formatted %s", "message");
+        record.setLoggerName("org.jboss.logmanager.ext.test");
+        record.setMillis(System.currentTimeMillis());
+        record.setThrown(createMultiNestedCause());
+        record.putMdc("testMdcKey", "testMdcValue");
+        record.setNdc("testNdc");
+        final String message = formatter.format(record);
+
+        final ErrorHandler handler = new ErrorHandler() {
+            @Override
+            public void warning(final SAXParseException exception) throws SAXException {
+                fail(exception);
+            }
+
+            @Override
+            public void error(final SAXParseException exception) throws SAXException {
+                fail(exception);
+            }
+
+            @Override
+            public void fatalError(final SAXParseException exception) throws SAXException {
+                fail(exception);
+            }
+
+            private void fail(final SAXParseException exception) {
+                final StringBuilder failureMessage = new StringBuilder();
+                failureMessage.append(exception.getLocalizedMessage())
+                        .append(": line ")
+                        .append(exception.getLineNumber())
+                        .append(" column ")
+                        .append(exception.getColumnNumber())
+                        .append(System.lineSeparator())
+                        .append(message);
+                Assert.fail(failureMessage.toString());
+            }
+        };
+
+        final SchemaFactory factory = SchemaFactory.newInstance(XMLConstants.W3C_XML_SCHEMA_NS_URI);
+        factory.setErrorHandler(handler);
+
+        final Schema schema = factory.newSchema(getClass().getResource("/xml-formatter.xsd"));
+        final Validator validator = schema.newValidator();
+        validator.setErrorHandler(handler);
+        validator.setFeature("http://apache.org/xml/features/validation/schema", true);
+        validator.validate(new StreamSource(new StringReader(message)));
+    }
 
     @Test
     public void testFormat() throws Exception {
@@ -141,14 +205,12 @@ public class XmlFormatterTest extends AbstractTest {
         boolean inException = false;
         while (reader.hasNext()) {
             final int state = reader.next();
-            if (state == XMLStreamConstants.END_ELEMENT && inException) {
+            if (state == XMLStreamConstants.END_ELEMENT && reader.getLocalName().equals(Key.EXCEPTION.getKey())) {
                 inException = false;
             }
             if (state == XMLStreamConstants.START_ELEMENT) {
                 final String localName = reader.getLocalName();
-                if (localName.equals(Key.EXCEPTION.getKey()) ||
-                        localName.equals(Key.EXCEPTION_CAUSED_BY.getKey()) ||
-                        localName.equals(Key.EXCEPTION_CIRCULAR_REFERENCE.getKey())) {
+                if (localName.equals(Key.EXCEPTION.getKey())) {
                     inException = true;// TODO (jrp) stack trace may need to be validated
                 } else if (localName.equals(Key.LEVEL.getKey())) {
                     Assert.assertEquals(record.getLevel(), Level.parse(getString(reader)));
@@ -191,5 +253,31 @@ public class XmlFormatterTest extends AbstractTest {
             Assert.assertTrue("Second map does not contain key " + key, m2.containsKey(key));
             Assert.assertEquals(m1.get(key), m2.get(key));
         }
+    }
+
+    private static Throwable createMultiNestedCause() {
+        final RuntimeException suppressed1 = new RuntimeException("Suppressed 1");
+        final IllegalStateException nested1 = new IllegalStateException("Nested 1");
+        nested1.addSuppressed(new RuntimeException("Nested 1a"));
+        suppressed1.addSuppressed(nested1);
+        suppressed1.addSuppressed(new IllegalStateException("Nested 1-2"));
+
+        final RuntimeException suppressed2 = new RuntimeException("Suppressed 2", suppressed1);
+        final IllegalStateException nested2 = new IllegalStateException("Nested 2");
+        nested2.addSuppressed(new RuntimeException("Nested 2a"));
+        suppressed2.addSuppressed(nested2);
+        suppressed2.addSuppressed(new IllegalStateException("Nested 2-2"));
+
+        final RuntimeException suppressed3 = new RuntimeException("Suppressed 3");
+        final IllegalStateException nested3 = new IllegalStateException("Nested 3");
+        nested3.addSuppressed(new RuntimeException("Nested 3a"));
+        suppressed3.addSuppressed(nested3);
+        suppressed3.addSuppressed(new IllegalStateException("Nested 3-2"));
+
+        final RuntimeException cause = new RuntimeException("This is the cause");
+        cause.addSuppressed(suppressed1);
+        cause.addSuppressed(suppressed2);
+        cause.addSuppressed(suppressed3);
+        return cause;
     }
 }

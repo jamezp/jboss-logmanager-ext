@@ -19,17 +19,17 @@
 
 package org.jboss.logmanager.ext.formatters;
 
-import java.io.PrintWriter;
 import java.io.Writer;
 import java.math.BigDecimal;
 import java.math.BigInteger;
-import java.util.Collections;
 import java.util.HashMap;
-import java.util.IdentityHashMap;
 import java.util.Map;
 import javax.json.Json;
 import javax.json.JsonValue;
+import javax.json.stream.JsonGenerator;
 import javax.json.stream.JsonGeneratorFactory;
+
+import org.jboss.logmanager.ext.util.PropertyValues;
 
 /**
  * A formatter that outputs the record into JSON format optionally printing details.
@@ -57,7 +57,21 @@ public class JsonFormatter extends StructuredFormatter {
      * Creates a new JSON formatter.
      */
     public JsonFormatter() {
-        this(Collections.<Key, String>emptyMap());
+        config = new HashMap<>();
+        factory = Json.createGeneratorFactory(config);
+    }
+
+    /**
+     * Creates a new JSON formatter.
+     *
+     * @param keyOverrides a string representation of a map to override keys
+     *
+     * @see PropertyValues#stringToEnumMap(Class, String)
+     */
+    public JsonFormatter(final String keyOverrides) {
+        super(keyOverrides);
+        config = new HashMap<>();
+        factory = Json.createGeneratorFactory(config);
     }
 
     /**
@@ -85,14 +99,14 @@ public class JsonFormatter extends StructuredFormatter {
     /**
      * Turns on or off pretty printing.
      *
-     * @param b {@code true} to turn on pretty printing or {@code false} to turn it off
+     * @param prettyPrint {@code true} to turn on pretty printing or {@code false} to turn it off
      */
-    public void setPrettyPrint(final boolean b) {
+    public void setPrettyPrint(final boolean prettyPrint) {
         synchronized (config) {
-            if (b) {
-                config.put(javax.json.stream.JsonGenerator.PRETTY_PRINTING, true);
+            if (prettyPrint) {
+                config.put(JsonGenerator.PRETTY_PRINTING, true);
             } else {
-                config.remove(javax.json.stream.JsonGenerator.PRETTY_PRINTING);
+                config.remove(JsonGenerator.PRETTY_PRINTING);
             }
             factory = Json.createGeneratorFactory(config);
         }
@@ -100,15 +114,18 @@ public class JsonFormatter extends StructuredFormatter {
 
     @Override
     protected Generator createGenerator(final Writer writer) {
-        return new JsonGenerator(writer, factory);
+        final JsonGeneratorFactory factory;
+        synchronized (config) {
+            factory = this.factory;
+        }
+        return new FormatterJsonGenerator(factory.createGenerator(writer));
     }
 
-    private class JsonGenerator extends Generator {
-        private final javax.json.stream.JsonGenerator generator;
-        private int stackTraceId = 0;
+    private class FormatterJsonGenerator extends Generator {
+        private final JsonGenerator generator;
 
-        private JsonGenerator(final Writer writer, final JsonGeneratorFactory factory) {
-            generator = factory.createGenerator(writer);
+        private FormatterJsonGenerator(final JsonGenerator generator) {
+            this.generator = generator;
         }
 
         @Override
@@ -152,22 +169,34 @@ public class JsonFormatter extends StructuredFormatter {
         }
 
         @Override
-        public Generator addStackTrace(final Throwable throwable) throws Exception {
-            if (throwable != null) {
-                if (isDetailedExceptionOutputType()) {
-                    // Use the identity of the throwable to determine uniqueness
-                    final Map<Throwable, Integer> seen = new IdentityHashMap<>();
-                    generator.writeStartArray(getKey(Key.EXCEPTION));
-                    addStackTraceEntry(throwable, seen);
-                    generator.writeEnd();
-                }
-
-                if (isFormattedExceptionOutputType()) {
-                    final StringBuilderWriter writer = new StringBuilderWriter();
-                    throwable.printStackTrace(new PrintWriter(writer));
-                    generator.write(getKey(Key.STACK_TRACE), writer.toString());
-                }
+        public Generator startObject(final String key) throws Exception {
+            if (key == null) {
+                generator.writeStartObject();
+            } else {
+                generator.writeStartObject(key);
             }
+            return this;
+        }
+
+        @Override
+        public Generator endObject() throws Exception {
+            generator.writeEnd();
+            return this;
+        }
+
+        @Override
+        public Generator startArray(final String key) throws Exception {
+            if (key == null) {
+                generator.writeStartArray();
+            } else {
+                generator.writeStartArray(key);
+            }
+            return this;
+        }
+
+        @Override
+        public Generator endArray() throws Exception {
+            generator.writeEnd();
             return this;
         }
 
@@ -177,61 +206,6 @@ public class JsonFormatter extends StructuredFormatter {
             generator.flush();
             generator.close();
             return this;
-        }
-
-        private void addStackTraceEntry(final Throwable throwable, final Map<Throwable, Integer> seen) {
-            if (throwable == null) {
-                return;
-            }
-            if (seen.containsKey(throwable)) {
-                generator.writeStartObject();
-                generator.writeStartObject(getKey(Key.EXCEPTION_CIRCULAR_REFERENCE));
-                generator.write(getKey(Key.EXCEPTION_MESSAGE), throwable.getMessage());
-                generator.write(getKey(Key.EXCEPTION_REFERENCE_ID), seen.get(throwable));
-                generator.writeEnd(); // end circular ref object
-                generator.writeEnd(); // end main object
-            } else {
-                seen.put(throwable, stackTraceId++);
-                generator.writeStartObject();
-                add(getKey(Key.EXCEPTION_TYPE), throwable.getClass().getName());
-                add(getKey(Key.EXCEPTION_MESSAGE), throwable.getMessage());
-                add(getKey(Key.EXCEPTION_REFERENCE_ID), stackTraceId);
-                addStackTraceElements(throwable.getStackTrace());
-
-                // Add suppressed messages
-                final Throwable[] suppressed = throwable.getSuppressed();
-                if (suppressed != null && suppressed.length > 0) {
-                    generator.writeStartArray(getKey(Key.EXCEPTION_SUPPRESSED));
-                    for (Throwable s : suppressed) {
-                        addStackTraceEntry(s, seen);
-                    }
-                    generator.writeEnd(); // end suppressed
-                }
-
-                // Add the cause
-                final Throwable cause = throwable.getCause();
-                if (cause != null) {
-                    generator.writeStartArray(getKey(Key.EXCEPTION_CAUSED_BY));
-                    addStackTraceEntry(cause, seen);
-                    generator.writeEnd(); // end cause array
-                }
-                generator.writeEnd(); // end exception object
-            }
-        }
-
-        private void addStackTraceElements(final StackTraceElement[] elements) {
-            generator.writeStartArray(getKey(Key.EXCEPTION_FRAMES));
-            for (StackTraceElement e : elements) {
-                generator.writeStartObject();
-                add(getKey(Key.EXCEPTION_FRAME_CLASS), e.getClassName());
-                add(getKey(Key.EXCEPTION_FRAME_METHOD), e.getMethodName());
-                final int line = e.getLineNumber();
-                if (line >= 0) {
-                    add(getKey(Key.EXCEPTION_FRAME_LINE), e.getLineNumber());
-                }
-                generator.writeEnd(); // end exception element
-            }
-            generator.writeEnd(); // end array
         }
 
         private void writeObject(final String key, final Object obj) {

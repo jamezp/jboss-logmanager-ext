@@ -36,6 +36,14 @@
         <version>17</version>
     </parent>
 
+    <licenses>
+        <license>
+            <name>Apache License 2.0</name>
+            <url>http://repository.jboss.org/licenses/apache-2.0.txt</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+
     <properties>
         <version.javax.json>1.0</version.javax.json>
         <version.org.apache.felix>2.3.7</version.org.apache.felix>

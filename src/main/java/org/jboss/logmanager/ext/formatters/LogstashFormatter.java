@@ -35,7 +35,8 @@ import org.jboss.logmanager.ExtLogRecord;
  */
 public class LogstashFormatter extends JsonFormatter {
 
-    private volatile int version = 1;
+    private volatile int version = 2;
+    private volatile String appName = System.getProperty( "appName" );
 
     /**
      * Create the lostash formatter.
@@ -56,6 +57,7 @@ public class LogstashFormatter extends JsonFormatter {
     @Override
     protected void before(final Generator generator, final ExtLogRecord record) throws Exception {
         generator.add("@version", version);
+        generator.add("@appName", appName);
     }
 
     /**

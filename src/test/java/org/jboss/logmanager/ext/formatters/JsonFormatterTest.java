@@ -26,6 +26,7 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
+
 import javax.json.Json;
 import javax.json.JsonObject;
 import javax.json.JsonReader;
@@ -84,7 +85,7 @@ public class JsonFormatterTest extends AbstractTest {
         final JsonFormatter formatter = new JsonFormatter();
         formatter.setPrintDetails(true);
         formatter.setMetaData("context-id=context1");
-        ExtLogRecord record = createLogRecord("Test formatted %s", "message");
+        final ExtLogRecord record = createLogRecord("Test formatted %s", "message");
         Map<String, String> metaDataMap = MapBuilder.<String, String>create()
                 .add("context-id", "context1")
                 .build();
@@ -101,14 +102,16 @@ public class JsonFormatterTest extends AbstractTest {
     @Test
     public void testLogstashFormat() throws Exception {
         KEY_OVERRIDES.put(Key.TIMESTAMP, "@timestamp");
+        final String appName = "junitApp";
+        System.setProperty( "appName" , appName );
         final LogstashFormatter formatter = new LogstashFormatter();
         formatter.setPrintDetails(true);
         ExtLogRecord record = createLogRecord("Test formatted %s", "message");
-        compareLogstash(record, formatter, 1);
+        compareLogstash(record, formatter, 2, appName);
 
         record = createLogRecord("Test Message");
-        formatter.setVersion(2);
-        compareLogstash(record, formatter, 2);
+        formatter.setVersion(3);
+        compareLogstash(record, formatter, 3, appName);
 
         record = createLogRecord(Level.ERROR, "Test formatted %s", "message");
         record.setLoggerName("org.jboss.logmanager.ext.test");
@@ -116,7 +119,7 @@ public class JsonFormatterTest extends AbstractTest {
         record.setThrown(new RuntimeException("Test Exception"));
         record.putMdc("testMdcKey", "testMdcValue");
         record.setNdc("testNdc");
-        compareLogstash(record, formatter, 2);
+        compareLogstash(record, formatter, 3, appName);
     }
 
     private static int getInt(final JsonObject json, final Key key) {
@@ -148,7 +151,7 @@ public class JsonFormatterTest extends AbstractTest {
         if (json.containsKey(name) && !json.isNull(name)) {
             final Map<String, String> result = new LinkedHashMap<>();
             final JsonObject mdcObject = json.getJsonObject(name);
-            for (String k : mdcObject.keySet()) {
+            for (final String k : mdcObject.keySet()) {
                 final JsonValue value = mdcObject.get(k);
                 if (value.getValueType() == ValueType.STRING) {
                     result.put(k, value.toString().replace("\"", ""));
@@ -186,24 +189,30 @@ public class JsonFormatterTest extends AbstractTest {
         compare(record, json, metaData);
     }
 
-    private static void compareLogstash(final ExtLogRecord record, final ExtFormatter formatter, final int version) {
-        compareLogstash(record, formatter.format(record), version);
+    private static void compareLogstash(final ExtLogRecord record, final ExtFormatter formatter, final int version, final String appName) {
+        compareLogstash(record, formatter.format(record), version, appName);
     }
 
-    private static void compareLogstash(final ExtLogRecord record, final String jsonString, final int version) {
+    private static void compareLogstash(final ExtLogRecord record, final String jsonString, final int version, final String appName) {
         final JsonReader reader = Json.createReader(new StringReader(jsonString));
         final JsonObject json = reader.readObject();
         compare(record, json, null);
         final String name = "@version";
+        final String appNameAttribute = "@appName";
         int foundVersion = 0;
+        String foundAppName = "";
         if (json.containsKey(name) && !json.isNull(name)) {
             foundVersion = json.getInt(name);
         }
+        if (json.containsKey(appNameAttribute) && !json.isNull(appNameAttribute)) {
+          foundAppName = json.getString(appNameAttribute);
+        }
         Assert.assertEquals(version, foundVersion);
+        Assert.assertEquals(appName, foundAppName);
     }
 
     private static void compare(final ExtLogRecord record, final JsonObject json, final Map<String, String> metaData) {
-        Assert.assertEquals(record.getLevel(), Level.parse(getString(json, Key.LEVEL)));
+        Assert.assertEquals(record.getLevel(), java.util.logging.Level.parse(getString(json, Key.LEVEL)));
         Assert.assertEquals(record.getLoggerClassName(), getString(json, Key.LOGGER_CLASS_NAME));
         Assert.assertEquals(record.getLoggerName(), getString(json, Key.LOGGER_NAME));
         compareMaps(record.getMdcCopy(), getMap(json, Key.MDC));
@@ -223,7 +232,7 @@ public class JsonFormatterTest extends AbstractTest {
         Assert.assertEquals(record.getThreadID(), getInt(json, Key.THREAD_ID));
         Assert.assertEquals(record.getThreadName(), getString(json, Key.THREAD_NAME));
         if (metaData != null) {
-            for (String key : metaData.keySet()) {
+            for (final String key : metaData.keySet()) {
                 Assert.assertEquals(metaData.get(key), json.getString(key));
             }
         }
